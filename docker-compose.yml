@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  dhruv-brain:
+    build: .
+    container_name: dhruv-brain-container
+    restart: unless-stopped
+    
+    # Load your API keys
+    env_file:
+      - .env
+      
+    # Force the HAL to load Jetson drivers
+    environment:
+      - ENV=PROD_JETSON
+      
+    # Expose the FastAPI Dashboard port
+    ports:
+      - "8000:8000"
+      
+    # Grant the container high-level hardware access
+    privileged: true
+    
+    # Map physical Jetson hardware to the container
+    devices:
+      - "/dev/video0:/dev/video0"      # The USB Camera
+      - "/dev/ttyACM0:/dev/ttyACM0"    # The Arduino Uno R4 (Check dmesg to confirm it's ACM0)
+      - "/dev/snd:/dev/snd"            # The Soundcard (For Azure ALSA playback)
+      
+    # Mount the code as a volume. Changes to .py files on Jetson reflect immediately inside the container.
+    volumes:
+      - .:/app
