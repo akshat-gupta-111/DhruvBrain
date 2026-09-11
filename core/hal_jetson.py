@@ -114,8 +114,9 @@ class Speaker:
         if self.speech_key and self.speech_region:
             speech_config = speechsdk.SpeechConfig(subscription=self.speech_key, region=self.speech_region)
             speech_config.speech_synthesis_voice_name = "en-US-GuyNeural"
-            # Jetson will route this natively through ALSA to /dev/snd
-            self.synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config)
+            alsa_device_name = "plughw:2,0"
+            audio_config = speechsdk.audio.AudioOutputConfig(device_name=alsa_device_name)
+            self.synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=audio_config)
             print("[HAL Speaker] Azure Neural Voice initialized (ALSA).")
 
     def speak(self, text: str):
