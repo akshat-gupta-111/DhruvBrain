@@ -5,8 +5,8 @@ pydantic==2.6.4
 openai==1.14.0
 azure-cognitiveservices-speech==1.37.0
 pyserial==3.5
-langgraph==0.0.26
+langgraph
+langchain-core
 python-dotenv==1.0.1
-
 fastapi==0.110.0
 uvicorn==0.27.1

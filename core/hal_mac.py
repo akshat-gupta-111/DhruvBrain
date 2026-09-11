@@ -1,5 +1,8 @@
 import os
 import cv2
+import sys
+import select
+import queue
 # import cv2
 import threading
 from typing import Optional
@@ -166,7 +169,7 @@ class Speaker:
             # SSML injects emotion, speeds up the talking rate by 5%, and raises pitch slightly
             ssml = f"""
             <speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="en-US">
-                <voice name="en-US-DavisNeural">
+                <voice name="hi-IN-KunalNeural">
                     <mstts:express-as style="cheerful" styledegree="1.5">
                         <prosody rate="+5%" pitch="+0%">
                             {text}
@@ -191,13 +194,71 @@ class Speaker:
 # ==========================================
 # 4. Mock LiDAR Trigger
 # ==========================================
+
+
+
+# ... (Keep MacCamera, MotorController, Speaker exactly the same) ...
+
 class MockLiDAR:
-    @staticmethod
-    def prompt_user() -> str:
-        """Blocks for a keypress to simulate spatial triggers."""
-        print("\n" + "=" * 50)
-        print("SIMULATION CONTROLS:")
-        print(" [Enter] -> Take snapshot and run Perception Loop")
-        print(" [q]     -> Quit")
-        print("=" * 50)
-        return input("Press [Enter] to scan... ").strip().lower()
+    def prompt_user(self) -> str:
+        # No more [Enter]! It simulates the robot wandering to a new spot every 5 seconds.
+        time.sleep(5) 
+        return "SCAN"
+
+class Microphone:
+    _instance = None
+    _lock = threading.Lock()
+
+    def __new__(cls, *args, **kwargs):
+        with cls._lock:
+            if cls._instance is None:
+                cls._instance = super(Microphone, cls).__new__(cls)
+                cls._instance._initialized = False
+            return cls._instance
+
+    def __init__(self):
+        if self._initialized: return
+        
+        self.speech_key = os.getenv("AZURE_SPEECH_KEY")
+        self.speech_region = os.getenv("AZURE_SPEECH_REGION")
+        self.speech_queue = queue.Queue()
+        self.is_muted = True # Start muted until Orchestrator is ready
+        
+        if self.speech_key and self.speech_region:
+            speech_config = speechsdk.SpeechConfig(subscription=self.speech_key, region=self.speech_region)
+            audio_config = speechsdk.audio.AudioConfig(use_default_microphone=True)
+            self.recognizer = speechsdk.SpeechRecognizer(speech_config=speech_config, audio_config=audio_config)
+            
+            # Use only recognized (finalized speech) to prevent double-triggering
+            self.recognizer.recognized.connect(self._recognized_cb)
+            self.recognizer.start_continuous_recognition_async()
+            print("[HAL Mic] 🎤 Background Queue Listener active.")
+        else:
+            print("[HAL Mic] ⚠️ Azure keys missing.")
+            
+        self._initialized = True
+
+    def _recognized_cb(self, evt):
+        if self.is_muted: return # Software mute prevents echoing the robot's own TTS
+        
+        text = evt.result.text.lower().strip()
+        if text:
+            print(f"\n[MIC 🎤] Heard: '{text}'")
+            self.speech_queue.put(text)
+
+    def get_speech(self) -> str:
+        """Non-blocking check for new speech."""
+        try:
+            return self.speech_queue.get_nowait()
+        except queue.Empty:
+            return ""
+
+    def mute(self):
+        self.is_muted = True
+        with self.speech_queue.mutex:
+            self.speech_queue.queue.clear()
+
+    def unmute(self):
+        with self.speech_queue.mutex:
+            self.speech_queue.queue.clear()
+        self.is_muted = False

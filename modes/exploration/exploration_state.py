@@ -4,15 +4,16 @@ from typing import TypedDict, Optional
 from langgraph.graph import StateGraph, END
 
 # Import our modular blocks
-from core.hal_mac import MacCamera, MotorController, Speaker, MockLiDAR
+from core.hal import Camera, MotorController, Speaker, LiDAR, Microphone
 from core.ai_pipeline import analyze_frame_moondream, extract_text_azure, reason_and_decide, RobotDecision
 
 # from core.hal import Camera, MotorController, Speaker, LiDAR
 
-camera = MacCamera()
+camera = Camera()
 motors = MotorController()
 speaker = Speaker()
-lidar = MockLiDAR()
+lidar = LiDAR()
+mic = Microphone()
 # ==========================================
 # 1. Define the LangGraph State
 # ==========================================
@@ -22,6 +23,7 @@ class RobotState(TypedDict):
     ocr_text: str
     decision: Optional[RobotDecision]
     should_quit: bool
+    wake_word_triggered: bool
 
 # Initialize Hardware (Global to this mode for simplicity)
 # camera = Camera()
@@ -33,14 +35,20 @@ class RobotState(TypedDict):
 # 2. Define the Nodes
 # ==========================================
 def node_capture(state: RobotState) -> dict:
-    """Simulates LiDAR interrupting the wander state to capture a frame."""
-    cmd = lidar.prompt_user()
+    # Pass the mic instance so LiDAR can check it non-blockingly
+    cmd = lidar.prompt_user() 
+    
     if cmd == "q":
-        return {"should_quit": True}
+        return {"should_quit": True, "wake_word_triggered": False}
+        
+    if cmd == "WAKE_WORD":
+        # Abort the graph instantly! Don't process vision.
+        return {"should_quit": True, "wake_word_triggered": True, "image_bytes": None, "perception_text": "", "ocr_text": ""}
     
     print("[Graph Node: Capture] Grabbing frame...")
     frame = camera.capture_frame_bytes()
-    return {"image_bytes": frame, "should_quit": False, "perception_text": "", "ocr_text": ""}
+    return {"image_bytes": frame, "should_quit": False, "wake_word_triggered": False, "perception_text": "", "ocr_text": ""}
+
 
 def node_perceive(state: RobotState) -> dict:
     """Calls Moondream and optionally Azure OCR."""
@@ -69,13 +77,8 @@ def node_reason(state: RobotState) -> dict:
     
     return {"decision": decision}
 
-def node_act(state: RobotState) -> dict:
-    """Executes the physical and vocal actions through the HAL."""
-    decision = state["decision"]
-    if decision:
-        motors.execute(decision.physical_action,decision.led_mood)
-        speaker.speak(decision.speech)
-    return {}
+# Remove node_act and update the graph builder:
+
 
 # ==========================================
 # 3. Routing Logic
@@ -88,14 +91,16 @@ def route_after_capture(state: RobotState) -> str:
 # ==========================================
 # 4. Build and Compile the Graph
 # ==========================================
+# ==========================================
+# 4. Build and Compile the Graph
+# ==========================================
 def build_exploration_graph():
     workflow = StateGraph(RobotState)
     
-    # Add nodes
+    # Add nodes (Notice: no 'act' node!)
     workflow.add_node("capture", node_capture)
     workflow.add_node("perceive", node_perceive)
     workflow.add_node("reason", node_reason)
-    workflow.add_node("act", node_act)
     
     # Add edges
     workflow.set_entry_point("capture")
@@ -108,41 +113,27 @@ def build_exploration_graph():
         }
     )
     workflow.add_edge("perceive", "reason")
-    workflow.add_edge("reason", "act")
-    workflow.add_edge("act", END)
+    workflow.add_edge("reason", END) # End right after reasoning!
     
     return workflow.compile()
 
 # ==========================================
 # 5. The Main Loop (Wander Mode)
 # ==========================================
-def run_exploration_mode():
+def run_exploration_step():
     graph = build_exploration_graph()
     
-    print("\n🚀 Dhruv Exploration Mode Initiated.")
-    # camera.open()
+    # Run one full cognitive loop and return the decision
+    final_state = graph.invoke({
+        "image_bytes": None,
+        "perception_text": "",
+        "ocr_text": "",
+        "decision": None,
+        "should_quit": False,
+        "wake_word_triggered": False
+    })
     
-    try:
-        while True:
-            # The robot is "wandering" until LiDAR triggers the graph
-            print("\n[WANDER STATE] 🔄 Motors moving forward. LiDAR scanning...")
-            
-            # Run one full cognitive loop
-            final_state = graph.invoke({
-                "image_bytes": None,
-                "perception_text": "",
-                "ocr_text": "",
-                "decision": None,
-                "should_quit": False
-            })
-            
-            if final_state.get("should_quit"):
-                print("[WANDER STATE] Terminating exploration mode.")
-                break
-                
-    finally:
-        camera.close()
-        print("[HAL] Hardware released safely.")
+    return final_state.get("decision")
 
 if __name__ == "__main__":
     run_exploration_mode()
