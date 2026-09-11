@@ -143,7 +143,8 @@ class Microphone:
         
         if self.speech_key and self.speech_region:
             speech_config = speechsdk.SpeechConfig(subscription=self.speech_key, region=self.speech_region)
-            audio_config = speechsdk.audio.AudioConfig(use_default_microphone=True)
+            alsa_device_name = "plughw:3,0"
+            audio_config = speechsdk.audio.AudioConfig(device_name=alsa_device_name)
             self.recognizer = speechsdk.SpeechRecognizer(speech_config=speech_config, audio_config=audio_config)
             
             self.recognizer.recognized.connect(self._recognized_cb)
