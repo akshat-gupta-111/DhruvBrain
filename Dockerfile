@@ -4,10 +4,11 @@ FROM python:3.10-slim
 # Prevent Python from buffering outputs
 ENV PYTHONUNBUFFERED=1
 
-# Install C++ build tools, Linux Audio drivers (ALSA), and Linux Video drivers (V4L)
+# 1. Install system utilities required to fetch packages
 RUN apt-get update && apt-get install -y \
+    wget \
+    gnupg \
     build-essential \
-    libssl-dev \
     libasound2 \
     alsa-utils \
     espeak \
@@ -18,14 +19,20 @@ RUN apt-get update && apt-get install -y \
     gstreamer1.0-tools \
     && rm -rf /var/lib/apt/lists/*
 
+# 2. Inject OpenSSL 1.1 (Required by Azure Speech SDK on Debian/Ubuntu modern images)
+RUN echo "deb http://ports.ubuntu.com/ubuntu-ports focal main universe" >> /etc/apt/sources.list && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends libssl1.1 && \
+    rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
-# Install Python dependencies
+# 3. Install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the DhruvBrain codebase
+# 4. Copy codebase
 COPY . .
 
-# Launch the orchestrator
+# Launch orchestrator
 CMD ["python", "main.py"]
