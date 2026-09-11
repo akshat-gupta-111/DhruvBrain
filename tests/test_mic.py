@@ -1,35 +1,31 @@
+import sys
 import os
-import azure.cognitiveservices.speech as speechsdk
-from dotenv import load_dotenv
+import time
 
-load_dotenv()
+# Add the project root to the path so we can import from core
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-def run_test():
-    speech_key = os.getenv("AZURE_SPEECH_KEY")
-    speech_region = os.getenv("AZURE_SPEECH_REGION")
-    
-    if not speech_key:
-        print("❌ AZURE_SPEECH_KEY is missing from .env")
-        return
+from core.hal import Microphone
 
-    print("Initializing Azure Speech...")
-    speech_config = speechsdk.SpeechConfig(subscription=speech_key, region=speech_region)
-    audio_config = speechsdk.audio.AudioConfig(use_default_microphone=True)
+def main():
+    print("Initializing Microphone...")
+    mic = Microphone()
     
-    recognizer = speechsdk.SpeechRecognizer(speech_config=speech_config, audio_config=audio_config)
+    print("Microphone initialized. Unmuting...")
+    mic.unmute()
     
-    print("\n🟢 MIC IS LIVE! Please speak into your Mac right now...")
+    print("Listening for 15 seconds. Please say something...")
+    start_time = time.time()
     
-    # recognize_once blocks the script until it hears a full sentence
-    result = recognizer.recognize_once_async().get()
-    
-    if result.reason == speechsdk.ResultReason.RecognizedSpeech:
-        print(f"\n✅ SUCCESS! I heard: '{result.text}'")
-    elif result.reason == speechsdk.ResultReason.NoMatch:
-        print("\n❌ FAILED: I heard silence. macOS is blocking the mic, or it's muted.")
-    elif result.reason == speechsdk.ResultReason.Canceled:
-        cancellation = result.cancellation_details
-        print(f"\n⚠️ CANCELED: {cancellation.reason} - {cancellation.error_details}")
+    while time.time() - start_time < 15:
+        speech = mic.get_speech()
+        if speech:
+            print(f"Received speech: {speech}")
+        time.sleep(0.1)
+        
+    print("Muting microphone...")
+    mic.mute()
+    print("Microphone test completed.")
 
 if __name__ == "__main__":
-    run_test()
+    main()

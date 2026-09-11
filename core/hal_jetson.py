@@ -114,7 +114,7 @@ class Speaker:
         if self.speech_key and self.speech_region:
             speech_config = speechsdk.SpeechConfig(subscription=self.speech_key, region=self.speech_region)
             speech_config.speech_synthesis_voice_name = "en-US-GuyNeural"
-            alsa_device_name = "plughw:2,0"
+            alsa_device_name = "plughw:3,0"
             audio_config = speechsdk.audio.AudioOutputConfig(device_name=alsa_device_name)
             self.synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=audio_config)
             print("[HAL Speaker] Azure Neural Voice initialized (ALSA).")
@@ -144,7 +144,7 @@ class Microphone:
         
         if self.speech_key and self.speech_region:
             speech_config = speechsdk.SpeechConfig(subscription=self.speech_key, region=self.speech_region)
-            alsa_device_name = "plughw:3,0"
+            alsa_device_name = "plughw:2,0"
             audio_config = speechsdk.audio.AudioConfig(device_name=alsa_device_name)
             self.recognizer = speechsdk.SpeechRecognizer(speech_config=speech_config, audio_config=audio_config)
             
