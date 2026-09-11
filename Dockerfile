@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     build-essential \
     libasound2 \
+    libasound2-plugins \
     alsa-utils \
     espeak \
     v4l-utils \

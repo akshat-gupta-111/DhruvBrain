@@ -7,6 +7,7 @@ import glob
 import cv2
 import serial
 import azure.cognitiveservices.speech as speechsdk
+import subprocess
 
 # ==========================================
 # 1. Jetson Camera (Thread-Safe Singleton)
@@ -110,19 +111,28 @@ class Speaker:
     def __init__(self):
         self.speech_key = os.getenv("AZURE_SPEECH_KEY")
         self.speech_region = os.getenv("AZURE_SPEECH_REGION")
-        self.synthesizer = None
         if self.speech_key and self.speech_region:
-            speech_config = speechsdk.SpeechConfig(subscription=self.speech_key, region=self.speech_region)
-            speech_config.speech_synthesis_voice_name = "en-US-GuyNeural"
-            alsa_device_name = "plughw:3,0"
-            audio_config = speechsdk.audio.AudioOutputConfig(device_name=alsa_device_name)
-            self.synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=audio_config)
-            print("[HAL Speaker] Azure Neural Voice initialized (ALSA).")
+            self.speech_config = speechsdk.SpeechConfig(subscription=self.speech_key, region=self.speech_region)
+            self.speech_config.speech_synthesis_voice_name = "en-US-GuyNeural"
+            print("[HAL Speaker] Azure Neural Voice initialized (aplay mode).")
 
     def speak(self, text: str):
         print(f"[SPEAKER 🎙️] \"{text}\"")
-        if self.synthesizer:
-            self.synthesizer.speak_text_async(text).get()
+        if self.speech_key and self.speech_region:
+            audio_config = speechsdk.audio.AudioOutputConfig(filename="/tmp/speak.wav")
+            synthesizer = speechsdk.SpeechSynthesizer(speech_config=self.speech_config, audio_config=audio_config)
+            result = synthesizer.speak_text_async(text).get()
+            if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
+                subprocess.run(["aplay", "-D", "plughw:2,0", "/tmp/speak.wav"], stderr=subprocess.DEVNULL)
+            else:
+                self._fallback_speak(text)
+        else:
+            self._fallback_speak(text)
+
+    def _fallback_speak(self, text: str):
+        import subprocess
+        sanitized = text.replace('"', '\\"')
+        subprocess.run(["espeak", "-ven+f3", "-s150", sanitized])
 
 class Microphone:
     _instance = None
