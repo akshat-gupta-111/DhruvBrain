@@ -12,9 +12,10 @@ services:
     # Triggers core/hal.py to load hal_jetson.py
     environment:
       - ENV=PROD_JETSON
-      # ALSA card name for ReSpeaker — use card name (stable) not index (shifts on replug)
-      # Run `aplay -l` on Jetson to confirm the exact card name
+      # ALSA card index for playback (aplay -l to find yours)
       - ALSA_DEVICE=plughw:2,0
+      # PyAudio device index for mic (list with: python -c "import speech_recognition as sr; print(sr.Microphone.list_microphone_names())")
+      - MIC_DEVICE_INDEX=0
       
     ports:
       - "8000:8000"

@@ -1,17 +1,16 @@
+import asyncio
 import os
 import cv2
 import sys
 import select
 import queue
-# import cv2
 import threading
 from typing import Optional
 import time
 import subprocess
 import glob
-# from typing import Optional
-# pyrefly: ignore [missing-import]
-import azure.cognitiveservices.speech as speechsdk
+import speech_recognition as sr
+import edge_tts
 
 # Optional serial import for when Arduino is plugged in
 try:
@@ -148,43 +147,28 @@ class MotorController:
 
 
 class Speaker:
-    def __init__(self):
-        self.speech_key = os.getenv("AZURE_SPEECH_KEY")
-        self.speech_region = os.getenv("AZURE_SPEECH_REGION")
-        self.synthesizer = None
+    """TTS via edge-tts on Mac. Falls back to macOS `say` command."""
+    VOICE = "en-US-GuyNeural"
 
-        if self.speech_key and self.speech_region:
-            speech_config = speechsdk.SpeechConfig(subscription=self.speech_key, region=self.speech_region)
-            # We leave voice blank here because SSML will override it
-            self.synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config)
-            print("[HAL Speaker] Azure Neural Voice initialized.")
-        else:
-            print("[HAL Speaker] Azure keys missing! Falling back to Mac robot voice.")
+    def __init__(self):
+        print("[HAL Speaker] Edge TTS initialized.")
 
     def speak(self, text: str):
-        if not text.strip(): return
-        print(f"[SPEAKER 🎙️] \"{text}\"")
-
-        if self.synthesizer:
-            # SSML injects emotion, speeds up the talking rate by 5%, and raises pitch slightly
-            ssml = f"""
-            <speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="en-US">
-                <voice name="hi-IN-KunalNeural">
-                    <mstts:express-as style="cheerful" styledegree="1.5">
-                        <prosody rate="+5%" pitch="+0%">
-                            {text}
-                        </prosody>
-                    </mstts:express-as>
-                </voice>
-            </speak>
-            """
-            result = self.synthesizer.speak_ssml_async(ssml).get()
-            
-            if result.reason != speechsdk.ResultReason.SynthesizingAudioCompleted:
-                print(f"[HAL Speaker] Azure TTS failed. Falling back.")
-                self._fallback_speak(text)
-        else:
+        if not text.strip():
+            return
+        print(f'[SPEAKER 🎙️] "{text}"')
+        try:
+            loop = asyncio.new_event_loop()
+            loop.run_until_complete(self._synthesize_and_play(text))
+            loop.close()
+        except Exception as e:
+            print(f"[HAL Speaker] Edge TTS failed: {e} — falling back to say")
             self._fallback_speak(text)
+
+    async def _synthesize_and_play(self, text: str):
+        communicate = edge_tts.Communicate(text, self.VOICE)
+        await communicate.save("/tmp/speak.mp3")
+        subprocess.run(["afplay", "/tmp/speak.mp3"], stderr=subprocess.DEVNULL)
 
     def _fallback_speak(self, text: str):
         sanitized = text.replace('"', '\\"')
@@ -206,6 +190,7 @@ class MockLiDAR:
         return "SCAN"
 
 class Microphone:
+    """Continuous STT via SpeechRecognition + Google STT on Mac default mic."""
     _instance = None
     _lock = threading.Lock()
 
@@ -217,37 +202,42 @@ class Microphone:
             return cls._instance
 
     def __init__(self):
-        if self._initialized: return
-        
-        self.speech_key = os.getenv("AZURE_SPEECH_KEY")
-        self.speech_region = os.getenv("AZURE_SPEECH_REGION")
+        if self._initialized:
+            return
+
         self.speech_queue = queue.Queue()
-        self.is_muted = True # Start muted until Orchestrator is ready
-        
-        if self.speech_key and self.speech_region:
-            speech_config = speechsdk.SpeechConfig(subscription=self.speech_key, region=self.speech_region)
-            audio_config = speechsdk.audio.AudioConfig(use_default_microphone=True)
-            self.recognizer = speechsdk.SpeechRecognizer(speech_config=speech_config, audio_config=audio_config)
-            
-            # Use only recognized (finalized speech) to prevent double-triggering
-            self.recognizer.recognized.connect(self._recognized_cb)
-            self.recognizer.start_continuous_recognition_async()
+        self.is_muted = True
+        self._stop_fn = None
+
+        try:
+            self._recognizer = sr.Recognizer()
+            self._recognizer.dynamic_energy_threshold = True
+            mic = sr.Microphone()  # Uses Mac default mic
+            with mic as source:
+                self._recognizer.adjust_for_ambient_noise(source, duration=1)
+            self._stop_fn = self._recognizer.listen_in_background(
+                mic, self._recognized_cb, phrase_time_limit=6
+            )
             print("[HAL Mic] 🎤 Background Queue Listener active.")
-        else:
-            print("[HAL Mic] ⚠️ Azure keys missing.")
-            
+        except Exception as e:
+            print(f"[HAL Mic] ⚠️  Failed to start microphone: {e}")
+
         self._initialized = True
 
-    def _recognized_cb(self, evt):
-        if self.is_muted: return # Software mute prevents echoing the robot's own TTS
-        
-        text = evt.result.text.lower().strip()
-        if text:
-            print(f"\n[MIC 🎤] Heard: '{text}'")
-            self.speech_queue.put(text)
+    def _recognized_cb(self, recognizer: sr.Recognizer, audio: sr.AudioData):
+        if self.is_muted:
+            return
+        try:
+            text = recognizer.recognize_google(audio).lower().strip()
+            if text:
+                print(f"\n[MIC 🎤] Heard: '{text}'")
+                self.speech_queue.put(text)
+        except sr.UnknownValueError:
+            pass
+        except sr.RequestError as e:
+            print(f"[HAL Mic] STT request error: {e}")
 
     def get_speech(self) -> str:
-        """Non-blocking check for new speech."""
         try:
             return self.speech_queue.get_nowait()
         except queue.Empty:

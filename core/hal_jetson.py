@@ -1,3 +1,4 @@
+import asyncio
 import queue
 import sys
 import threading
@@ -6,7 +7,8 @@ import os
 import glob
 import cv2
 import serial
-import azure.cognitiveservices.speech as speechsdk
+import speech_recognition as sr
+import edge_tts
 import subprocess
 
 # ==========================================
@@ -107,39 +109,63 @@ class MotorController:
 # ==========================================
 # 3. Speaker & Mic (Singleton Queue)
 # ==========================================
-# Stable ALSA device name — use card name instead of index (index shifts on replug)
-# Override via ALSA_DEVICE env var in .env or docker-compose.yml
-ALSA_DEVICE = os.getenv("ALSA_DEVICE", "plughw:ReSpeaker,0")
+# ALSA device for playback — override via ALSA_DEVICE in .env or docker-compose.yml
+# Run `aplay -l` on the Jetson to find your card index/name
+ALSA_DEVICE = os.getenv("ALSA_DEVICE", "plughw:2,0")
+
+# PyAudio device index for the ReSpeaker microphone
+# Run `python -c "import speech_recognition as sr; print(sr.Microphone.list_microphone_names())"` to find it
+MIC_DEVICE_INDEX = int(os.getenv("MIC_DEVICE_INDEX", "0"))
+
 
 class Speaker:
+    """TTS via edge-tts (Microsoft Neural voices, no API key needed).
+    Synthesizes MP3 to /tmp/speak.mp3, plays via mpv on the ALSA device.
+    Falls back to espeak if edge-tts or mpv fails.
+    """
+    VOICE = "en-US-GuyNeural"
+
     def __init__(self):
-        self.speech_key = os.getenv("AZURE_SPEECH_KEY")
-        self.speech_region = os.getenv("AZURE_SPEECH_REGION")
         self.alsa_device = ALSA_DEVICE
-        if self.speech_key and self.speech_region:
-            self.speech_config = speechsdk.SpeechConfig(subscription=self.speech_key, region=self.speech_region)
-            self.speech_config.speech_synthesis_voice_name = "en-US-GuyNeural"
-            print(f"[HAL Speaker] Azure Neural Voice initialized (aplay via {self.alsa_device}).")
+        print(f"[HAL Speaker] Edge TTS initialized (mpv via {self.alsa_device}).")
 
     def speak(self, text: str):
-        print(f"[SPEAKER 🎙️] \"{text}\"")
-        if self.speech_key and self.speech_region:
-            audio_config = speechsdk.audio.AudioOutputConfig(filename="/tmp/speak.wav")
-            synthesizer = speechsdk.SpeechSynthesizer(speech_config=self.speech_config, audio_config=audio_config)
-            result = synthesizer.speak_text_async(text).get()
-            if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
-                subprocess.run(["aplay", "-D", self.alsa_device, "/tmp/speak.wav"], stderr=subprocess.DEVNULL)
-            else:
-                self._fallback_speak(text)
-        else:
+        if not text.strip():
+            return
+        print(f'[SPEAKER 🎙️] "{text}"')
+        try:
+            # Run async edge-tts in a fresh event loop (safe from any thread)
+            loop = asyncio.new_event_loop()
+            loop.run_until_complete(self._synthesize_and_play(text))
+            loop.close()
+        except Exception as e:
+            print(f"[HAL Speaker] Edge TTS failed: {e} — falling back to espeak")
             self._fallback_speak(text)
 
+    async def _synthesize_and_play(self, text: str):
+        """Generates MP3 via edge-tts then plays it through mpv on the ALSA device."""
+        communicate = edge_tts.Communicate(text, self.VOICE)
+        await communicate.save("/tmp/speak.mp3")
+        # mpv audio-device format: alsa/plughw:CARD,DEV
+        alsa_mpv = f"alsa/{self.alsa_device}"
+        result = subprocess.run(
+            ["mpv", "--no-terminal", f"--audio-device={alsa_mpv}", "/tmp/speak.mp3"],
+            stderr=subprocess.PIPE
+        )
+        if result.returncode != 0:
+            # mpv failed — try without device spec (use ALSA default)
+            subprocess.run(["mpv", "--no-terminal", "/tmp/speak.mp3"], stderr=subprocess.DEVNULL)
+
     def _fallback_speak(self, text: str):
-        import subprocess
         sanitized = text.replace('"', '\\"')
         subprocess.run(["espeak", "-ven+f3", "-s150", sanitized])
 
+
 class Microphone:
+    """Continuous STT via SpeechRecognition + PyAudio + Google STT.
+    Runs listen_in_background() in a daemon thread, same queue-based
+    interface as before — main.py needs zero changes.
+    """
     _instance = None
     _lock = threading.Lock()
 
@@ -151,31 +177,48 @@ class Microphone:
             return cls._instance
 
     def __init__(self):
-        if self._initialized: return
-        self.speech_key = os.getenv("AZURE_SPEECH_KEY")
-        self.speech_region = os.getenv("AZURE_SPEECH_REGION")
+        if self._initialized:
+            return
+
         self.speech_queue = queue.Queue()
-        self.is_muted = True 
-        
-        if self.speech_key and self.speech_region:
-            speech_config = speechsdk.SpeechConfig(subscription=self.speech_key, region=self.speech_region)
-            # Use stable card name; override via ALSA_DEVICE env var
-            alsa_device_name = ALSA_DEVICE
-            audio_config = speechsdk.audio.AudioConfig(device_name=alsa_device_name)
-            self.recognizer = speechsdk.SpeechRecognizer(speech_config=speech_config, audio_config=audio_config)
-            
-            self.recognizer.recognized.connect(self._recognized_cb)
-            self.recognizer.start_continuous_recognition_async()
-            print("[HAL Mic] 🎤 Jetson ALSA Background Queue Listener active.")
-            
+        self.is_muted = True  # Start muted until Orchestrator is ready
+        self._stop_fn = None
+
+        try:
+            self._recognizer = sr.Recognizer()
+            # Slightly more aggressive energy threshold for robot env noise
+            self._recognizer.dynamic_energy_threshold = True
+            self._recognizer.energy_threshold = 400
+
+            mic = sr.Microphone(device_index=MIC_DEVICE_INDEX)
+            with mic as source:
+                # Calibrate for ambient noise once at startup
+                self._recognizer.adjust_for_ambient_noise(source, duration=1)
+
+            # listen_in_background returns a stop function; phrase_time_limit
+            # prevents the thread from blocking forever on one phrase
+            self._stop_fn = self._recognizer.listen_in_background(
+                mic, self._recognized_cb, phrase_time_limit=6
+            )
+            print("[HAL Mic] 🎤 SpeechRecognition Background Queue Listener active.")
+        except Exception as e:
+            print(f"[HAL Mic] ⚠️  Failed to start microphone: {e}")
+
         self._initialized = True
 
-    def _recognized_cb(self, evt):
-        if self.is_muted: return 
-        text = evt.result.text.lower().strip()
-        if text:
-            print(f"\n[MIC 🎤] Heard: '{text}'")
-            self.speech_queue.put(text)
+    def _recognized_cb(self, recognizer: sr.Recognizer, audio: sr.AudioData):
+        """Called in background thread for every detected phrase."""
+        if self.is_muted:
+            return
+        try:
+            text = recognizer.recognize_google(audio).lower().strip()
+            if text:
+                print(f"\n[MIC 🎤] Heard: '{text}'")
+                self.speech_queue.put(text)
+        except sr.UnknownValueError:
+            pass  # Inaudible / silence
+        except sr.RequestError as e:
+            print(f"[HAL Mic] STT request error: {e}")
 
     def get_speech(self) -> str:
         try:
@@ -193,10 +236,11 @@ class Microphone:
             self.speech_queue.queue.clear()
         self.is_muted = False
 
+
 # ==========================================
 # 4. LiDAR (Autonomous Trigger)
 # ==========================================
 class JetsonLiDAR:
     def prompt_user(self) -> str:
-        time.sleep(5) 
+        time.sleep(5)
         return "SCAN"
