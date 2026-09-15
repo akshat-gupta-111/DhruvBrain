@@ -11,3 +11,4 @@ langchain-core
 python-dotenv==1.0.1
 fastapi==0.110.0
 uvicorn==0.27.1
+sounddevice==0.4.6

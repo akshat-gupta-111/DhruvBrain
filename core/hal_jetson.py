@@ -107,14 +107,19 @@ class MotorController:
 # ==========================================
 # 3. Speaker & Mic (Singleton Queue)
 # ==========================================
+# Stable ALSA device name — use card name instead of index (index shifts on replug)
+# Override via ALSA_DEVICE env var in .env or docker-compose.yml
+ALSA_DEVICE = os.getenv("ALSA_DEVICE", "plughw:ReSpeaker,0")
+
 class Speaker:
     def __init__(self):
         self.speech_key = os.getenv("AZURE_SPEECH_KEY")
         self.speech_region = os.getenv("AZURE_SPEECH_REGION")
+        self.alsa_device = ALSA_DEVICE
         if self.speech_key and self.speech_region:
             self.speech_config = speechsdk.SpeechConfig(subscription=self.speech_key, region=self.speech_region)
             self.speech_config.speech_synthesis_voice_name = "en-US-GuyNeural"
-            print("[HAL Speaker] Azure Neural Voice initialized (aplay mode).")
+            print(f"[HAL Speaker] Azure Neural Voice initialized (aplay via {self.alsa_device}).")
 
     def speak(self, text: str):
         print(f"[SPEAKER 🎙️] \"{text}\"")
@@ -123,7 +128,7 @@ class Speaker:
             synthesizer = speechsdk.SpeechSynthesizer(speech_config=self.speech_config, audio_config=audio_config)
             result = synthesizer.speak_text_async(text).get()
             if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
-                subprocess.run(["aplay", "-D", "plughw:2,0", "/tmp/speak.wav"], stderr=subprocess.DEVNULL)
+                subprocess.run(["aplay", "-D", self.alsa_device, "/tmp/speak.wav"], stderr=subprocess.DEVNULL)
             else:
                 self._fallback_speak(text)
         else:
@@ -154,7 +159,8 @@ class Microphone:
         
         if self.speech_key and self.speech_region:
             speech_config = speechsdk.SpeechConfig(subscription=self.speech_key, region=self.speech_region)
-            alsa_device_name = "plughw:2,0"
+            # Use stable card name; override via ALSA_DEVICE env var
+            alsa_device_name = ALSA_DEVICE
             audio_config = speechsdk.audio.AudioConfig(device_name=alsa_device_name)
             self.recognizer = speechsdk.SpeechRecognizer(speech_config=speech_config, audio_config=audio_config)
             
