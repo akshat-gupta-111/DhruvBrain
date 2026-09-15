@@ -35,11 +35,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gstreamer1.0-tools \
     && rm -rf /var/lib/apt/lists/*
 
-# 2. Download and install libssl1.1 for ARM64 (required by Azure Speech SDK)
-#    Uncomment ONLY if you see SSL errors on the real Jetson
-# RUN wget -O /tmp/libssl1.1.deb \
-#     http://ports.ubuntu.com/ubuntu-ports/pool/main/o/openssl/libssl1.1_1.1.1f-1ubuntu2_arm64.deb && \
-#     dpkg -i /tmp/libssl1.1.deb && rm /tmp/libssl1.1.deb
+# 2. Install libssl1.1 for ARM64 — REQUIRED by Azure Speech SDK's azure-c-shared layer
+#    Error code 2176 = platform init failure without this library on ARM64
+RUN wget -q -O /tmp/libssl1.1.deb \
+    http://ports.ubuntu.com/ubuntu-ports/pool/main/o/openssl/libssl1.1_1.1.1f-1ubuntu2_arm64.deb && \
+    dpkg -i /tmp/libssl1.1.deb && \
+    rm /tmp/libssl1.1.deb
 
 WORKDIR /app
 
