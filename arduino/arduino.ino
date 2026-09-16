@@ -85,12 +85,15 @@ void parseCommand(String payload) {
   if (ledCmd.length() > 0 && ledCmd.startsWith("<LED,") && ledCmd.endsWith(">")) {
     int startIdx = 5; // Length of "<LED,"
     int endIdx = ledCmd.length() - 1;
-    currentMood = ledCmd.substring(startIdx, endIdx);
+    String newMood = ledCmd.substring(startIdx, endIdx);
     
-    // Reset timer state on mood change
-    previousMillis = millis(); 
-    ledState = HIGH; 
-    digitalWrite(LED_PIN, ledState);
+    // Only reset timer state if the mood actually changes
+    if (newMood != currentMood) {
+      currentMood = newMood;
+      previousMillis = millis(); 
+      ledState = HIGH; 
+      digitalWrite(LED_PIN, ledState);
+    }
   }
 }
 
