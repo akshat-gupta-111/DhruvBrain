@@ -13,15 +13,15 @@ services:
     environment:
       - ENV=PROD_JETSON
       # ── Speaker ─────────────────────────────────────────
-      # ALSA card for playback. Run `aplay -l` on Jetson to confirm.
+      # ALSA card for mpv playback. Run `aplay -l` on Jetson to confirm.
       - ALSA_DEVICE=plughw:2,0
-      # ── Microphone (sounddevice, same as utility.py) ────
-      # Capture device index. Run `python -c "import sounddevice as sd; print(sd.query_devices())"` on Jetson.
+      # ── Microphone (sounddevice, from utility.py) ────────
+      # Capture device index (PulseAudio node)
       - INPUT_DEVICE_INDEX=26
-      # Channel count for ReSpeaker 4-Mic Array
-      - MIC_CHANNELS=6
-      # RMS energy threshold for VAD — raise if too much noise triggers STT
-      - SPEECH_RMS_THRESHOLD=300
+      # Playback device index (ReSpeaker hardware speaker)
+      - PLAYBACK_DEVICE_INDEX=24
+      # PulseAudio nodes export stereo (2), not raw 6-ch ALSA driver
+      - MIC_CHANNELS=2
       
     ports:
       - "8000:8000"

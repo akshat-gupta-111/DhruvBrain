@@ -113,26 +113,31 @@ class MotorController:
 # ==========================================
 # 3. Speaker & Mic (Singleton Queue)
 # ==========================================
-# ALSA device for playback — override via ALSA_DEVICE in .env or docker-compose.yml
+# ALSA device name for mpv — override via ALSA_DEVICE in docker-compose.yml
 ALSA_DEVICE = os.getenv("ALSA_DEVICE", "plughw:2,0")
 
-# sounddevice capture indices — proven by utility.py
-# INPUT_DEVICE_INDEX=26 is the working PulseAudio capture node for the ReSpeaker
-# MIC_CHANNELS=6 is the ReSpeaker 4-Mic Array driver channel count
-INPUT_DEVICE_INDEX = int(os.getenv("INPUT_DEVICE_INDEX", "26"))
-MIC_CHANNELS       = int(os.getenv("MIC_CHANNELS", "6"))
+# sounddevice indices — from working utility.py configuration
+INPUT_DEVICE_INDEX    = int(os.getenv("INPUT_DEVICE_INDEX",    "26"))  # PulseAudio capture node
+PLAYBACK_DEVICE_INDEX = int(os.getenv("PLAYBACK_DEVICE_INDEX", "24"))  # ReSpeaker hardware speaker
+
+# CHANNELS=2: PulseAudio nodes export stereo (not raw 6-ch ALSA driver)
+# Updated from utility.py: was 6, now 2
+MIC_CHANNELS = int(os.getenv("MIC_CHANNELS", "2"))
 
 
 class Speaker:
-    """TTS via edge-tts (Microsoft Neural voices, no API key needed).
-    Synthesizes MP3 to /tmp/speak.mp3, plays via mpv on the ALSA device.
-    Falls back to espeak if edge-tts or mpv fails.
+    """TTS via edge-tts streamed directly to mpv stdin.
+
+    True streaming: mpv starts playing the first audio chunk ~100ms
+    after edge-tts begins synthesis — no temp files, no full synthesis wait.
+    Pipe: edge-tts.stream() → mp3 chunks → mpv stdin → ALSA device
+    Falls back to espeak if mpv/edge-tts fails.
     """
     VOICE = "en-US-GuyNeural"
 
     def __init__(self):
         self.alsa_device = ALSA_DEVICE
-        print(f"[HAL Speaker] Edge TTS initialized (mpv via {self.alsa_device}).")
+        print(f"[HAL Speaker] Edge TTS streaming initialized → mpv → {self.alsa_device}.")
 
     def speak(self, text: str):
         if not text.strip():
@@ -140,22 +145,63 @@ class Speaker:
         print(f'[SPEAKER 🎙️] "{text}"')
         try:
             loop = asyncio.new_event_loop()
-            loop.run_until_complete(self._synthesize_and_play(text))
+            loop.run_until_complete(self._stream_to_mpv(text))
             loop.close()
         except Exception as e:
-            print(f"[HAL Speaker] Edge TTS failed: {e} — falling back to espeak")
+            print(f"[HAL Speaker] Streaming failed: {e} — falling back to espeak")
             self._fallback_speak(text)
 
-    async def _synthesize_and_play(self, text: str):
-        communicate = edge_tts.Communicate(text, self.VOICE)
-        await communicate.save("/tmp/speak.mp3")
+    async def _stream_to_mpv(self, text: str):
+        """Stream edge-tts MP3 chunks directly into mpv's stdin.
+        mpv buffers ~0.1s then starts playing immediately while chunks arrive.
+        """
         alsa_mpv = f"alsa/{self.alsa_device}"
-        result = subprocess.run(
-            ["mpv", "--no-terminal", f"--audio-device={alsa_mpv}", "/tmp/speak.mp3"],
-            stderr=subprocess.PIPE
+        proc = subprocess.Popen(
+            [
+                "mpv",
+                "--no-terminal",
+                f"--audio-device={alsa_mpv}",
+                "--demuxer=lavf",          # force lavf demuxer for piped MP3
+                "--demuxer-lavf-format=mp3",
+                "-",                       # read from stdin
+            ],
+            stdin=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
         )
-        if result.returncode != 0:
-            subprocess.run(["mpv", "--no-terminal", "/tmp/speak.mp3"], stderr=subprocess.DEVNULL)
+        communicate = edge_tts.Communicate(text, self.VOICE)
+        try:
+            async for chunk in communicate.stream():
+                if chunk["type"] == "audio":
+                    proc.stdin.write(chunk["data"])
+        except BrokenPipeError:
+            pass  # mpv closed early (e.g. very short phrase)
+        finally:
+            try:
+                proc.stdin.close()
+            except Exception:
+                pass
+        proc.wait()  # block until mpv finishes playing
+
+        # Retry without explicit device if mpv failed (device string mismatch)
+        if proc.returncode != 0:
+            proc2 = subprocess.Popen(
+                ["mpv", "--no-terminal", "--demuxer=lavf",
+                 "--demuxer-lavf-format=mp3", "-"],
+                stdin=subprocess.PIPE, stderr=subprocess.DEVNULL
+            )
+            communicate2 = edge_tts.Communicate(text, self.VOICE)
+            try:
+                async for chunk in communicate2.stream():
+                    if chunk["type"] == "audio":
+                        proc2.stdin.write(chunk["data"])
+            except BrokenPipeError:
+                pass
+            finally:
+                try:
+                    proc2.stdin.close()
+                except Exception:
+                    pass
+            proc2.wait()
 
     def _fallback_speak(self, text: str):
         sanitized = text.replace('"', '\\"')
@@ -244,9 +290,13 @@ class Microphone:
                         # --- 4 seconds of audio collected ---
                         # Extract mono channel 0, exactly like utility.py:
                         #   full_audio = np.concatenate(audio_frames, axis=0)
-                        #   mono_audio = full_audio[:, 0]
+                        #   mono_audio = full_audio[:, 0]   if channels > 1
+                        #   mono_audio = full_audio.flatten() if mono
                         full_audio = np.concatenate(audio_frames, axis=0)
-                        mono_audio = full_audio[:, 0]
+                        if MIC_CHANNELS > 1:
+                            mono_audio = full_audio[:, 0]
+                        else:
+                            mono_audio = full_audio.flatten()
 
                         # Reset buffer for next chunk
                         audio_frames  = []
