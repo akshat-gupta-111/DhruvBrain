@@ -124,12 +124,15 @@ You have commanded APPROACH {memory.approach_count} consecutive times.
 RULE 2: If you have approached 2 or more times, you are physically too close. You MUST choose HALT or PIVOT.
 
 RULE 3: If your visual perception says 'BLOCKED_VIEW', you are in pitch darkness or your camera is covered. You MUST complain playfully about being blindfolded or in the dark, and choose BACKUP_0.5M or PIVOT_LEFT_30 to escape it.
+
+RULE 4: Do not use any emojis in your speech response.
 """
 
 
-def reason_and_decide(visual_description: str, ocr_text: str = "") -> RobotDecision:
+def reason_and_decide(visual_description: str, ocr_text: str = "", safest_direction: str = "") -> RobotDecision:
     user_context = f"Visual Perception: {visual_description}\n"
     if ocr_text: user_context += f"OCR Extracted Text: {ocr_text}\n"
+    if safest_direction: user_context += f"LiDAR Safest Move Direction: {safest_direction}. Pick a physical_action that moves towards this free space if possible.\n"
 
     try:
         completion = azure_client.beta.chat.completions.parse(

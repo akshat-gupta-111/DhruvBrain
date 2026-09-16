@@ -209,9 +209,61 @@ class Microphone:
 # ==========================================
 # 4. LiDAR (Autonomous Trigger)
 # ==========================================
+def get_sector(angle):
+    if angle >= 337.5 or angle < 22.5:   return 'N'  
+    elif 22.5 <= angle < 67.5:           return 'NE' 
+    elif 67.5 <= angle < 112.5:          return 'E'  
+    elif 112.5 <= angle < 157.5:         return 'SE' 
+    elif 157.5 <= angle < 202.5:         return 'S'  
+    elif 202.5 <= angle < 247.5:         return 'SW' 
+    elif 247.5 <= angle < 292.5:         return 'W'  
+    elif 292.5 <= angle < 337.5:         return 'NW'
+
 class JetsonLiDAR:
+    def __init__(self):
+        self.port = '/dev/ttyUSB0'
+
     def prompt_user(self) -> str:
+        # Kept for backward compatibility if called
         time.sleep(5)
         return "SCAN"
+
+    def get_safest_direction(self) -> str:
+        try:
+            from rplidar import RPLidar
+            lidar = RPLidar(self.port, baudrate=115200, timeout=3)
+            try:
+                lidar.stop()
+                lidar.stop_motor()
+                lidar.clean_input()
+            except:
+                pass
+            time.sleep(0.5)
+            
+            safest_direction = ""
+            for i, scan in enumerate(lidar.iter_scans()):
+                sector_data = { 'N': [], 'NE': [], 'E': [], 'SE': [], 'S': [], 'SW': [], 'W': [], 'NW': [] }
+                for (_, angle, distance) in scan:
+                    if distance > 0:
+                        sector = get_sector(angle)
+                        if sector:
+                            sector_data[sector].append(distance)
+                        
+                closest_obstacles = {}
+                for sector, distances in sector_data.items():
+                    closest_obstacles[sector] = min(distances) if distances else 12000
+                    
+                safest_direction = max(closest_obstacles, key=closest_obstacles.get)
+                break # Just read one full 360-degree rotation!
+                
+            lidar.stop()
+            lidar.stop_motor()
+            lidar.disconnect()
+            
+            print(f"[HAL LiDAR] Safest free-space direction: {safest_direction}")
+            return safest_direction
+        except Exception as e:
+            print(f"[HAL LiDAR] Error reading LiDAR: {e}")
+            return ""
 
 

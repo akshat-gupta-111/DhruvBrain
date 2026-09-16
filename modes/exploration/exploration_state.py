@@ -12,6 +12,7 @@ class RobotState(TypedDict):
     image_bytes: Optional[bytes]
     perception_text: str
     ocr_text: str
+    safest_direction: str
     decision: Optional[RobotDecision]
     should_quit: bool
     wake_word_triggered: bool
@@ -29,7 +30,7 @@ def node_capture(state: RobotState) -> dict:
     cmd = lidar.prompt_user() 
     
     if cmd == "q":
-        return {"should_quit": True, "wake_word_triggered": False, "image_bytes": None, "perception_text": "", "ocr_text": ""}
+        return {"should_quit": True, "wake_word_triggered": False, "image_bytes": None, "perception_text": "", "ocr_text": "", "safest_direction": ""}
         
     print("[Graph Node: Capture] Grabbing frame...")
     try:
@@ -38,7 +39,11 @@ def node_capture(state: RobotState) -> dict:
         print(f"[Graph Node: Capture] Camera error: {e}")
         frame = None
         
-    return {"image_bytes": frame, "should_quit": False, "wake_word_triggered": False, "perception_text": "", "ocr_text": ""}
+    safest_dir = ""
+    if hasattr(lidar, "get_safest_direction"):
+        safest_dir = lidar.get_safest_direction()
+        
+    return {"image_bytes": frame, "should_quit": False, "wake_word_triggered": False, "perception_text": "", "ocr_text": "", "safest_direction": safest_dir}
 
 def route_after_capture(state: RobotState) -> str:
     if state.get("should_quit") or state.get("wake_word_triggered"):
@@ -61,7 +66,7 @@ def node_perceive(state: RobotState) -> dict:
 
 def node_reason(state: RobotState) -> dict:
     print("[Graph Node: Reason] Thinking...")
-    decision = reason_and_decide(state["perception_text"], state["ocr_text"])
+    decision = reason_and_decide(state["perception_text"], state["ocr_text"], state.get("safest_direction", ""))
     return {"decision": decision}
 
 # ==========================================
@@ -95,6 +100,7 @@ def run_exploration_step():
         "image_bytes": None,
         "perception_text": "",
         "ocr_text": "",
+        "safest_direction": "",
         "decision": None,
         "should_quit": False,
         "wake_word_triggered": False
