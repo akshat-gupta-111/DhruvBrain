@@ -4,6 +4,9 @@ from langgraph.graph import StateGraph, END
 
 from core.hal import Camera, LiDAR
 from core.ai_pipeline import analyze_frame_moondream, extract_text_azure, reason_and_decide, RobotDecision
+from core.vision_face import FaceIdentityEngine
+import cv2
+import numpy as np
 
 # ==========================================
 # 1. State Definition
@@ -56,6 +59,15 @@ def node_perceive(state: RobotState) -> dict:
         
     print("[Graph Node: Perceive] Analyzing scene context...")
     perception = analyze_frame_moondream(state["image_bytes"])
+    
+    try:
+        np_arr = np.frombuffer(state["image_bytes"], np.uint8)
+        img_color = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+        names, face_desc = FaceIdentityEngine().detect_faces(img_color)
+        if face_desc:
+            perception += f"\n[Face Identity Output] {face_desc}"
+    except Exception as e:
+        print(f"[Graph Node: Perceive] Face Identity Error: {e}")
     ocr = ""
     
     if "text" in perception.lower() or "sign" in perception.lower() or "read" in perception.lower():
