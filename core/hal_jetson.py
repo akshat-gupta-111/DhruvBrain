@@ -163,28 +163,28 @@ class Speaker:
 
 
 class Microphone:
-    """Continuous STT using sounddevice (proven by utility.py) + VAD + Google STT.
+    """Continuous STT using the exact same sounddevice pattern as utility.py.
 
-    Architecture:
-      sounddevice InputStream (device=26, 6ch)
-        └─ VAD loop detects speech onset via RMS energy
-          └─ Collects audio frames until silence timeout
-            └─ Sends WAV bytes to SpeechRecognition.recognize_google()
-              └─ Pushes text into queue for Orchestrator
+    utility.py approach:
+      fuser -k /dev/snd/pcmC2D0c           # flush device locks
+      sd.InputStream(device=26, ch=6) as stream:
+        while running:
+          data_chunk, _ = stream.read(1024)
+          audio_frames.append(data_chunk)
+      full_audio = np.concatenate(audio_frames, axis=0)
+      mono_audio = full_audio[:, 0]         # channel 0 = primary mic
 
-    Same get_speech() / mute() / unmute() interface — main.py unchanged.
+    Here we keep the stream open permanently, collect 4-second chunks,
+    and send each chunk to Google STT when unmuted.
+    Stream never closes on mute — we just discard chunks to avoid device re-init.
     """
     _instance = None
-    _lock = threading.Lock()
+    _lock     = threading.Lock()
 
-    # Audio capture config (matches utility.py values exactly)
-    SAMPLE_RATE   = 16000
-    CHUNK_FRAMES  = 1024
-    # RMS level above which we consider audio as "speech"
-    # Tune up if mic picks up too much room noise
-    SPEECH_RMS_THRESHOLD = float(os.getenv("SPEECH_RMS_THRESHOLD", "300"))
-    # Seconds of silence after speech that triggers STT submission
-    SILENCE_TIMEOUT_SEC  = 1.5
+    SAMPLE_RATE      = 16000
+    READ_CHUNK       = 1024                       # exactly as in utility.py
+    STT_SECONDS      = 4                          # seconds per Google STT call
+    STT_FRAMES_TOTAL = STT_SECONDS * SAMPLE_RATE  # frames to collect before sending
 
     def __new__(cls, *args, **kwargs):
         with cls._lock:
@@ -198,81 +198,91 @@ class Microphone:
             return
 
         self.speech_queue = queue.Queue()
-        self.is_muted     = True   # muted until Orchestrator calls unmute()
+        self.is_muted     = True    # stays muted until Orchestrator calls unmute()
         self._running     = True
         self._recognizer  = sr.Recognizer()
 
-        self._thread = threading.Thread(target=self._vad_loop, daemon=True)
+        # Flush device locks exactly as utility.py does
+        os.system("fuser -k /dev/snd/pcmC2D0c 2>/dev/null")
+        time.sleep(0.5)
+
+        self._thread = threading.Thread(target=self._stream_loop, daemon=True)
         self._thread.start()
-        print("[HAL Mic] 🎤 sounddevice VAD listener active "
-              f"(device={INPUT_DEVICE_INDEX}, ch={MIC_CHANNELS}).")
+        print(f"[HAL Mic] 🎤 sounddevice listener active "
+              f"(device={INPUT_DEVICE_INDEX}, ch={MIC_CHANNELS}, "
+              f"{self.STT_SECONDS}s chunks → Google STT).")
 
         self._initialized = True
 
     # ------------------------------------------------------------------
-    # VAD capture loop (runs in background thread)
+    # Core stream loop — mirrors utility.py's while loop exactly
     # ------------------------------------------------------------------
-    def _vad_loop(self):
-        silence_limit = int(
-            self.SILENCE_TIMEOUT_SEC * self.SAMPLE_RATE / self.CHUNK_FRAMES
-        )
-
+    def _stream_loop(self):
         while self._running:
-            if self.is_muted:
-                time.sleep(0.1)
-                continue
-
-            speech_frames   = []
-            silence_counter = 0
-            in_speech       = False
-
             try:
+                # Open once, keep alive — same as utility.py's `with sd.InputStream`
                 with sd.InputStream(
                     device=INPUT_DEVICE_INDEX,
                     channels=MIC_CHANNELS,
                     samplerate=self.SAMPLE_RATE,
                     dtype='int16'
                 ) as stream:
+                    print("[HAL Mic] 🔊 Stream opened successfully.")
 
-                    while self._running and not self.is_muted:
-                        chunk, _ = stream.read(self.CHUNK_FRAMES)
-                        mono     = chunk[:, 0]  # channel 0 = primary mic
-                        rms      = float(np.sqrt(np.mean(mono.astype(np.float32) ** 2)))
+                    audio_frames  = []
+                    frames_so_far = 0
 
-                        if rms >= self.SPEECH_RMS_THRESHOLD:
-                            in_speech       = True
-                            silence_counter = 0
-                            speech_frames.append(mono)
+                    while self._running:
+                        # Read exactly like utility.py: stream.read(1024)
+                        data_chunk, overflowed = stream.read(self.READ_CHUNK)
+                        frames_so_far += len(data_chunk)
+                        audio_frames.append(data_chunk)
 
-                        elif in_speech:
-                            speech_frames.append(mono)  # keep trailing silence
-                            silence_counter += 1
+                        if frames_so_far < self.STT_FRAMES_TOTAL:
+                            continue  # keep filling the chunk
 
-                            if silence_counter >= silence_limit:
-                                # --- phrase complete: ship to STT ---
-                                self._submit_for_stt(speech_frames)
-                                speech_frames   = []
-                                silence_counter = 0
-                                in_speech       = False
+                        # --- 4 seconds of audio collected ---
+                        # Extract mono channel 0, exactly like utility.py:
+                        #   full_audio = np.concatenate(audio_frames, axis=0)
+                        #   mono_audio = full_audio[:, 0]
+                        full_audio = np.concatenate(audio_frames, axis=0)
+                        mono_audio = full_audio[:, 0]
+
+                        # Reset buffer for next chunk
+                        audio_frames  = []
+                        frames_so_far = 0
+
+                        # Discard if muted (speaker is talking)
+                        if self.is_muted:
+                            continue
+
+                        # Send mono PCM to Google STT in a separate thread
+                        # so we don't block the stream read loop
+                        threading.Thread(
+                            target=self._submit_for_stt,
+                            args=(mono_audio,),
+                            daemon=True
+                        ).start()
 
             except Exception as e:
                 if self._running:
                     print(f"[HAL Mic] Stream error: {e} — retrying in 2s")
                     time.sleep(2)
+                    # Re-flush locks before retry
+                    os.system("fuser -k /dev/snd/pcmC2D0c 2>/dev/null")
+                    time.sleep(0.5)
 
-    def _submit_for_stt(self, frames: list):
-        """Convert collected mono frames to WAV and send to Google STT."""
-        if not frames:
-            return
-        pcm = np.concatenate(frames).tobytes()
-
-        # Build an in-memory WAV file
+    # ------------------------------------------------------------------
+    # STT submission — converts mono int16 PCM to WAV, calls Google STT
+    # ------------------------------------------------------------------
+    def _submit_for_stt(self, mono_audio: np.ndarray):
+        """Wraps mono int16 array as in-memory WAV and calls recognize_google."""
         buf = io.BytesIO()
         with wave.open(buf, 'wb') as wf:
             wf.setnchannels(1)
-            wf.setsampwidth(2)      # int16 = 2 bytes
+            wf.setsampwidth(2)          # int16 = 2 bytes, same as utility.py
             wf.setframerate(self.SAMPLE_RATE)
-            wf.writeframes(pcm)
+            wf.writeframes(mono_audio.tobytes())
         buf.seek(0)
 
         try:
@@ -283,9 +293,9 @@ class Microphone:
                 print(f"\n[MIC 🎤] Heard: '{text}'")
                 self.speech_queue.put(text)
         except sr.UnknownValueError:
-            pass   # inaudible / silence only
+            pass    # silence or inaudible — perfectly normal
         except sr.RequestError as e:
-            print(f"[HAL Mic] Google STT request error: {e}")
+            print(f"[HAL Mic] Google STT error: {e}")
         except Exception as e:
             print(f"[HAL Mic] STT error: {e}")
 
@@ -316,5 +326,3 @@ class JetsonLiDAR:
     def prompt_user(self) -> str:
         time.sleep(5)
         return "SCAN"
-
-
