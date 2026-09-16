@@ -20,12 +20,19 @@ class DhruvOrchestrator:
     def safe_speak(self, text: str):
         """Mutes the mic, speaks, waits for the cloud echo to pass, then unmutes."""
         self.mic.mute()
+        
+        # Trigger Arduino light blinking
+        self.motors.execute("HALT", "SPEAKING")
+        
         self.speaker.speak(text)
         
         # INCREASED to 2.5s: Gives Azure STT enough time to drop late transcriptions 
         time.sleep(2.5) 
         
         self.mic.unmute()
+        
+        # Return to idle light
+        self.motors.execute("HALT", "IDLE_WHITE")
 
     def get_full_speech(self) -> str:
         """Drains the queue and combines ALL speech heard, instead of just the last phrase."""
