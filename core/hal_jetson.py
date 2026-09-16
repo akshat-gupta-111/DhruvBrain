@@ -2,6 +2,9 @@ import json
 import queue
 import sys
 import threading
+import queue
+import asyncio
+from bleak import BleakClient, BleakScanner
 import time
 import os
 import glob
@@ -70,25 +73,62 @@ class JetsonCamera:
             self.cap.release()
 
 # ==========================================
-# 2. Arduino Motor Controller (Linux USB)
+# 2. Arduino Motor Controller (BLE)
 # ==========================================
-class MotorController:
-    def __init__(self, baud_rate: int = 115200):
-        self.serial_conn = None
-        self._init_serial(baud_rate)
+BLE_SERVICE_UUID = "19b10000-e8f2-537e-4f6c-d104768a1214"
+BLE_CHAR_UUID = "19b10001-e8f2-537e-4f6c-d104768a1214"
+BLE_DEVICE_NAME = "Dhruv_Arduino"
 
-    def _init_serial(self, baud: int):
-        # Jetson usually mounts Arduino Uno as /dev/ttyACM0 or ACM1
-        ports = glob.glob("/dev/ttyACM*") + glob.glob("/dev/ttyUSB*")
-        if ports:
+class MotorController:
+    def __init__(self):
+        self.cmd_queue = queue.Queue()
+        self.client = None
+        self.connected = False
+        
+        # Start the background BLE worker thread
+        self.ble_thread = threading.Thread(target=self._run_ble_loop, daemon=True)
+        self.ble_thread.start()
+
+    def _run_ble_loop(self):
+        """Runs the asyncio event loop for BLE in a background thread."""
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(self._ble_worker())
+
+    async def _ble_worker(self):
+        print(f"[HAL Motor] Scanning for BLE device: {BLE_DEVICE_NAME}...")
+        while True:
             try:
-                self.serial_conn = serial.Serial(ports[0], baud, timeout=1)
-                time.sleep(1.5)
-                print(f"[HAL Motor] Connected to Arduino on {ports[0]}")
+                if not self.connected:
+                    device = await BleakScanner.find_device_by_name(BLE_DEVICE_NAME, timeout=5.0)
+                    if device:
+                        print(f"[HAL Motor] Found {BLE_DEVICE_NAME}. Connecting...")
+                        self.client = BleakClient(device)
+                        await self.client.connect()
+                        self.connected = True
+                        print(f"[HAL Motor] BLE Connected!")
+                    else:
+                        await asyncio.sleep(2)
+                        continue
+
+                # Check queue for commands (non-blocking)
+                try:
+                    payload = self.cmd_queue.get_nowait()
+                    if self.client and self.connected:
+                        await self.client.write_gatt_char(BLE_CHAR_UUID, payload.encode('utf-8'))
+                except queue.Empty:
+                    await asyncio.sleep(0.05) # Small sleep to prevent CPU spin
+                    continue
+
             except Exception as e:
-                print(f"[HAL Motor] Failed to open serial port {ports[0]}: {e}")
-        else:
-            print("[HAL Motor] No Arduino found on Jetson USB.")
+                print(f"[HAL Motor] BLE Error: {e}. Reconnecting...")
+                self.connected = False
+                if self.client:
+                    try:
+                        await self.client.disconnect()
+                    except:
+                        pass
+                await asyncio.sleep(2)
 
     def execute(self, action: str, led_mood: str = "IDLE_WHITE"):
         action_map = {
@@ -102,12 +142,9 @@ class MotorController:
         display_text, serial_cmd = action_map.get(action, (f"❓ UNKNOWN ({action})", "<STOP>"))
         print(f"[CHASSIS ACTION] {display_text} | 💡 LED: {led_mood}")
 
-        if self.serial_conn and self.serial_conn.is_open:
-            try:
-                full_payload = f"{serial_cmd}|<LED,{led_mood}>\n"
-                self.serial_conn.write(full_payload.encode('utf-8'))
-            except Exception as e:
-                print(f"[HAL Motor] Serial write error: {e}")
+        full_payload = f"{serial_cmd}|<LED,{led_mood}>\n"
+        # Push to background thread so AI loop never freezes on BLE drop
+        self.cmd_queue.put(full_payload)
 
 # ==========================================
 # 3. Speaker & Mic — HTTP Audio Sidecar

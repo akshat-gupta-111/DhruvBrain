@@ -1,6 +1,12 @@
+#include <ArduinoBLE.h>
+
 // ==========================================
-// DhruvBrain Arduino Motor & LED Controller
+// DhruvBrain Arduino Motor & LED Controller (BLE)
 // ==========================================
+
+// BLE Setup
+BLEService dhruvService("19b10000-e8f2-537e-4f6c-d104768a1214");
+BLEStringCharacteristic commandChar("19b10001-e8f2-537e-4f6c-d104768a1214", BLEWrite | BLENotify, 50);
 
 // Pin Definitions
 const int LED_PIN = 9; // MOSFET triggering the 12V Blue Light
@@ -27,22 +33,49 @@ void setup() {
   
   digitalWrite(LED_PIN, LOW);
   stopMotors();
-  
-  Serial.println("Arduino Initialized");
+
+  if (!BLE.begin()) {
+    Serial.println("starting Bluetooth® Low Energy failed!");
+    while (1);
+  }
+
+  BLE.setLocalName("Dhruv_Arduino");
+  BLE.setAdvertisedService(dhruvService);
+
+  dhruvService.addCharacteristic(commandChar);
+  BLE.addService(dhruvService);
+
+  BLE.advertise();
+  Serial.println("Arduino BLE Peripheral Active. Waiting for Jetson...");
 }
 
 void loop() {
-  // 1. Check for incoming Serial commands
-  if (Serial.available() > 0) {
-    String payload = Serial.readStringUntil('\n');
-    payload.trim();
-    if (payload.length() > 0) {
-      parseCommand(payload);
-    }
-  }
+  BLEDevice central = BLE.central();
 
-  // 2. Manage LED blinking non-blockingly
-  handleLED();
+  if (central) {
+    Serial.print("Connected to central: ");
+    Serial.println(central.address());
+
+    while (central.connected()) {
+      // 1. Check for incoming BLE commands
+      if (commandChar.written()) {
+        String payload = commandChar.value();
+        payload.trim();
+        if (payload.length() > 0) {
+          parseCommand(payload);
+        }
+      }
+
+      // 2. Manage LED blinking non-blockingly
+      handleLED();
+    }
+    
+    Serial.println("Disconnected from central.");
+    stopMotors();
+  } else {
+    // Keep blinking if not connected
+    handleLED();
+  }
 }
 
 // Parse something like "<FWD,50,500>|<LED,IDLE_WHITE>"
