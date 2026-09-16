@@ -41,7 +41,7 @@ SAMPLE_RATE           = 16000
 READ_CHUNK            = 1024                          # matches utility.py
 STT_CHUNK_FRAMES      = 4 * SAMPLE_RATE               # 4-second STT windows
 ALSA_DEVICE           = os.getenv("ALSA_DEVICE", "pulse")
-TTS_VOICE             = "en-US-GuyNeural"
+TTS_VOICE             = "hi-IN-MadhurNeural"
 
 # ── Shared mic state ──────────────────────────────────────────────────
 _speech_queue: list[str] = []

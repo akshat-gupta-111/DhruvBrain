@@ -15,7 +15,7 @@ sounddevice==0.4.6
 edge-tts>=6.1.0
 SpeechRecognition>=3.10.0
 PyAudio>=0.2.13
-rplidar-robotic
+rplidar
 cmake
 dlib
 face_recognition

@@ -61,6 +61,11 @@ class FaceIdentityEngine:
         1) A list of detected names (e.g. ['Akshat', 'Unknown'])
         2) A descriptive string summarizing who is in the frame and their descriptions.
         """
+        if not self.known_face_encodings:
+            self._load_known_faces("known_faces")
+        if not self.descriptions:
+            self._load_descriptions("description.json")
+            
         if frame is None:
             return [], ""
 

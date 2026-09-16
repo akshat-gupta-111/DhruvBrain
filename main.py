@@ -99,7 +99,17 @@ class DhruvOrchestrator:
             if self.state == "CONVERSATION":
                 if speech:
                     self.motors.execute("HALT", "THINKING_BLUE")
-                    reply = generate_chat_response(speech)
+                    
+                    visual_context = ""
+                    try:
+                        frame = self.camera.capture_frame()
+                        names, face_desc = FaceIdentityEngine().detect_faces(frame)
+                        if face_desc:
+                            visual_context = f"[Vision System detected faces: {face_desc}]"
+                    except Exception as e:
+                        print(f"[Orchestrator] Continuous vision error: {e}")
+                        
+                    reply = generate_chat_response(speech, visual_context)
                     self.safe_speak(reply)
                     self.motors.execute("HALT", "FLIRT_PINK")
                 else:

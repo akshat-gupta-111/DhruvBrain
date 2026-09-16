@@ -16,13 +16,17 @@ AZURE_DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4o")
 chat_history = [
     {
         "role": "system", 
-        "content": "You are Dhruv, an AI companion robot built by Akshat. Keep your answers fun, witty, and strictly under 2 sentences. You are having a casual conversation. Do not use any emojis in your response."
+        "content": "You are Dhruv, an AI companion robot built by Daksh Dynamics. Keep your answers fun, witty, and strictly under 2 sentences. You are having a casual conversation. Do not use any emojis in your response."
     }
 ]
 
-def generate_chat_response(user_text: str) -> str:
+def generate_chat_response(user_text: str, visual_context: str = "") -> str:
     """Takes user text, queries GPT-4o with memory, and returns the AI's response."""
-    chat_history.append({"role": "user", "content": user_text})
+    contextualized_text = user_text
+    if visual_context:
+        contextualized_text = f"{visual_context}\nUser says: {user_text}"
+        
+    chat_history.append({"role": "user", "content": contextualized_text})
     print("[Brain] Thinking...")
     
     try:
