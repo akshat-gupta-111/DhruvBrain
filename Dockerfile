@@ -25,8 +25,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpulse-dev \
     # mpv — plays edge-tts MP3 output to hardware speaker
     mpv \
-    # TTS fallback
+    # TTS fallback + STT audio encoding
     espeak \
+    flac \
     # Camera / USB video
     v4l-utils \
     # GStreamer (optional pipeline support)
