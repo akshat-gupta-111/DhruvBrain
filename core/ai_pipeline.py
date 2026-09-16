@@ -7,6 +7,7 @@ from typing import Literal, List
 from pydantic import BaseModel, Field
 from openai import AzureOpenAI
 from dotenv import load_dotenv
+from core.vision_face import FaceIdentityEngine
 
 load_dotenv()
 
@@ -169,6 +170,13 @@ def process_visual_frame(image_bytes: bytes) -> RobotDecision:
         # The room is lit, let Moondream do its job
         perception_text = analyze_frame_moondream(image_bytes)
         
+        # Identify Faces
+        face_engine = FaceIdentityEngine()
+        img_color = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+        names, face_desc = face_engine.detect_faces(img_color)
+        if face_desc:
+            perception_text += f"\n[Face Identity Output] {face_desc}"
+            
         ocr_text = ""
         keywords = ["text", "poster", "board", "written", "screen", "sign", "paper", "magazine", "book"]
         if any(word in perception_text.lower() for word in keywords):

@@ -4,16 +4,18 @@ import uvicorn
 import string
 from core.dashboard import app
 from core.hal import Camera, Microphone, Speaker, MotorController
+from core.vision_face import FaceIdentityEngine
 
 from modes.exploration.exploration_state import run_exploration_step
 from modes.conversation.conversation_state import generate_chat_response
 
 class DhruvOrchestrator:
-    def __init__(self):
+    def __init__(self, camera: Camera):
         self.state = "IDLE"
         self.mic = Microphone()
         self.speaker = Speaker()
         self.motors = MotorController()
+        self.camera = camera
         
     def safe_speak(self, text: str):
         """Mutes the mic, speaks, waits for the cloud echo to pass, then unmutes."""
@@ -47,7 +49,23 @@ class DhruvOrchestrator:
         if any(w in clean_speech for w in ["hello dhruv", "hello drove", "hey dhruv", "hi dhruv", "hello robot"]):
             self.state = "CONVERSATION"
             self.motors.execute("HALT", "FLIRT_PINK")
-            self.safe_speak("Hey Akshat! What's on your mind?")
+            
+            greeting = "Hey there! What's on your mind?"
+            try:
+                # Try to see who we are talking to
+                frame = self.camera.capture_frame()
+                names, desc = FaceIdentityEngine().detect_faces(frame)
+                if names:
+                    # Greet the first person found, default to 'Hey there' if unknown
+                    first_person = names[0]
+                    if first_person != "Unknown":
+                        greeting = f"Hey {first_person}! What's on your mind?"
+                    else:
+                        greeting = "Hey there! I don't think we've met. What's on your mind?"
+            except Exception as e:
+                print(f"[Orchestrator] Vision greeting error: {e}")
+
+            self.safe_speak(greeting)
             return True
             
         if any(w in clean_speech for w in ["go explore", "start exploring", "explore"]):
@@ -117,7 +135,7 @@ if __name__ == "__main__":
     cam.start_capture_thread()
     threading.Thread(target=start_dashboard, daemon=True).start()
     
-    orchestrator = DhruvOrchestrator()
+    orchestrator = DhruvOrchestrator(cam)
     try:
         orchestrator.run()
     except KeyboardInterrupt:

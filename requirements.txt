@@ -16,3 +16,7 @@ edge-tts>=6.1.0
 SpeechRecognition>=3.10.0
 PyAudio>=0.2.13
 rplidar-robotic
+cmake
+dlib
+face_recognition
+mediapipe

@@ -57,6 +57,11 @@ class JetsonCamera:
         success, buffer = cv2.imencode(".jpg", self.latest_frame, encode_param)
         return buffer.tobytes()
 
+    def capture_frame(self):
+        if self.latest_frame is None:
+            raise RuntimeError("No frame available.")
+        return self.latest_frame
+
     def close(self):
         self.running = False
         if self.thread and self.thread.is_alive():
