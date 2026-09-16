@@ -31,3 +31,4 @@ services:
 
     volumes:
       - .:/app
+      - "/var/run/dbus:/var/run/dbus"  # Required for BLE (bleak/BlueZ) to access host Bluetooth
