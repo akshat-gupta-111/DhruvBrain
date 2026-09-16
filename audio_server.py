@@ -30,13 +30,17 @@ import speech_recognition as sr
 import edge_tts
 
 # ── Audio config (directly from utility.py) ──────────────────────────
-INPUT_DEVICE_INDEX    = int(os.getenv("INPUT_DEVICE_INDEX",    "26"))  # PulseAudio capture
-PLAYBACK_DEVICE_INDEX = int(os.getenv("PLAYBACK_DEVICE_INDEX", "24"))  # ReSpeaker hardware
+def parse_device(val):
+    try: return int(val)
+    except ValueError: return val
+
+INPUT_DEVICE_INDEX    = parse_device(os.getenv("INPUT_DEVICE_INDEX",    "pulse"))
+PLAYBACK_DEVICE_INDEX = parse_device(os.getenv("PLAYBACK_DEVICE_INDEX", "pulse"))
 MIC_CHANNELS          = int(os.getenv("MIC_CHANNELS",          "2"))   # PulseAudio → stereo
 SAMPLE_RATE           = 16000
 READ_CHUNK            = 1024                          # matches utility.py
 STT_CHUNK_FRAMES      = 4 * SAMPLE_RATE               # 4-second STT windows
-ALSA_DEVICE           = os.getenv("ALSA_DEVICE", "plughw:2,0")
+ALSA_DEVICE           = os.getenv("ALSA_DEVICE", "pulse")
 TTS_VOICE             = "en-US-GuyNeural"
 
 # ── Shared mic state ──────────────────────────────────────────────────
@@ -134,7 +138,7 @@ def _do_speak(text: str):
 
 
 async def _stream_to_mpv(text: str):
-    alsa_mpv = f"alsa/{ALSA_DEVICE}"
+    alsa_mpv = f"alsa/{ALSA_DEVICE}" if ALSA_DEVICE != "pulse" else "pulse"
     proc = subprocess.Popen(
         ["mpv", "--no-terminal", f"--audio-device={alsa_mpv}",
          "--demuxer=lavf", "--demuxer-lavf-format=mp3", "-"],

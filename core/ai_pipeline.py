@@ -81,11 +81,12 @@ def analyze_frame_moondream(image_bytes: bytes) -> str:
     headers = {"Content-Type": "application/json", "ngrok-skip-browser-warning": "true"}
 
     try:
-        response = requests.post(f"{base_url}/api/generate", json=payload, headers=headers, timeout=35.0)
+        response = requests.post(f"{base_url}/api/generate", json=payload, headers=headers, timeout=120.0)
         if response.status_code == 200:
             return response.json().get("response", "").strip()
         return f"Perception service returned status {response.status_code}."
     except Exception as e:
+        print(f"[AI Pipeline] Vision model error or timeout: {e}")
         return "Camera frame received, but visual perception failed."
 
 def extract_text_azure(image_bytes: bytes) -> str:
@@ -140,7 +141,8 @@ def reason_and_decide(visual_description: str, ocr_text: str = "") -> RobotDecis
         decision = completion.choices[0].message.parsed
         memory.log_turn(decision.physical_action, decision.speech)
         return decision
-    except:
+    except Exception as e:
+        print(f"[AI Pipeline] GPT reasoning error: {e}")
         return RobotDecision(visual_critique="Error.", physical_action="HALT", speech="I need a second to process.", led_mood="ALERT_RED")
 
 # ==========================================

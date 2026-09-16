@@ -10,11 +10,11 @@ DURATION = 5
 FILENAME = "output.wav" 
 
 # Target indices directly from your working configuration
-INPUT_DEVICE_INDEX = 26      # Working pulse capture node
-PLAYBACK_DEVICE_INDEX = 24   # Working ReSpeaker hardware speaker node
+INPUT_DEVICE_INDEX = "pulse"      # Uses PulseAudio capture server (Index 30)
+PLAYBACK_DEVICE_INDEX = "pulse"   # Uses PulseAudio playback server (Index 30)
 
 # CHANGE THIS: PulseAudio nodes usually export 1 (mono) or 2 (stereo) channels
-CHANNELS = 2  
+CHANNELS = 2
 
 def main():
     print("--- Jetson Audio Controller (Pulse Node Mode) ---")
