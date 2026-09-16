@@ -1,12 +1,16 @@
 import asyncio
+import io
 import queue
 import sys
 import threading
 import time
 import os
 import glob
+import wave
+import numpy as np
 import cv2
 import serial
+import sounddevice as sd
 import speech_recognition as sr
 import edge_tts
 import subprocess
@@ -110,12 +114,13 @@ class MotorController:
 # 3. Speaker & Mic (Singleton Queue)
 # ==========================================
 # ALSA device for playback — override via ALSA_DEVICE in .env or docker-compose.yml
-# Run `aplay -l` on the Jetson to find your card index/name
 ALSA_DEVICE = os.getenv("ALSA_DEVICE", "plughw:2,0")
 
-# PyAudio device index for the ReSpeaker microphone
-# Run `python -c "import speech_recognition as sr; print(sr.Microphone.list_microphone_names())"` to find it
-MIC_DEVICE_INDEX = int(os.getenv("MIC_DEVICE_INDEX", "0"))
+# sounddevice capture indices — proven by utility.py
+# INPUT_DEVICE_INDEX=26 is the working PulseAudio capture node for the ReSpeaker
+# MIC_CHANNELS=6 is the ReSpeaker 4-Mic Array driver channel count
+INPUT_DEVICE_INDEX = int(os.getenv("INPUT_DEVICE_INDEX", "26"))
+MIC_CHANNELS       = int(os.getenv("MIC_CHANNELS", "6"))
 
 
 class Speaker:
@@ -134,7 +139,6 @@ class Speaker:
             return
         print(f'[SPEAKER 🎙️] "{text}"')
         try:
-            # Run async edge-tts in a fresh event loop (safe from any thread)
             loop = asyncio.new_event_loop()
             loop.run_until_complete(self._synthesize_and_play(text))
             loop.close()
@@ -143,17 +147,14 @@ class Speaker:
             self._fallback_speak(text)
 
     async def _synthesize_and_play(self, text: str):
-        """Generates MP3 via edge-tts then plays it through mpv on the ALSA device."""
         communicate = edge_tts.Communicate(text, self.VOICE)
         await communicate.save("/tmp/speak.mp3")
-        # mpv audio-device format: alsa/plughw:CARD,DEV
         alsa_mpv = f"alsa/{self.alsa_device}"
         result = subprocess.run(
             ["mpv", "--no-terminal", f"--audio-device={alsa_mpv}", "/tmp/speak.mp3"],
             stderr=subprocess.PIPE
         )
         if result.returncode != 0:
-            # mpv failed — try without device spec (use ALSA default)
             subprocess.run(["mpv", "--no-terminal", "/tmp/speak.mp3"], stderr=subprocess.DEVNULL)
 
     def _fallback_speak(self, text: str):
@@ -162,12 +163,28 @@ class Speaker:
 
 
 class Microphone:
-    """Continuous STT via SpeechRecognition + PyAudio + Google STT.
-    Runs listen_in_background() in a daemon thread, same queue-based
-    interface as before — main.py needs zero changes.
+    """Continuous STT using sounddevice (proven by utility.py) + VAD + Google STT.
+
+    Architecture:
+      sounddevice InputStream (device=26, 6ch)
+        └─ VAD loop detects speech onset via RMS energy
+          └─ Collects audio frames until silence timeout
+            └─ Sends WAV bytes to SpeechRecognition.recognize_google()
+              └─ Pushes text into queue for Orchestrator
+
+    Same get_speech() / mute() / unmute() interface — main.py unchanged.
     """
     _instance = None
     _lock = threading.Lock()
+
+    # Audio capture config (matches utility.py values exactly)
+    SAMPLE_RATE   = 16000
+    CHUNK_FRAMES  = 1024
+    # RMS level above which we consider audio as "speech"
+    # Tune up if mic picks up too much room noise
+    SPEECH_RMS_THRESHOLD = float(os.getenv("SPEECH_RMS_THRESHOLD", "300"))
+    # Seconds of silence after speech that triggers STT submission
+    SILENCE_TIMEOUT_SEC  = 1.5
 
     def __new__(cls, *args, **kwargs):
         with cls._lock:
@@ -181,45 +198,100 @@ class Microphone:
             return
 
         self.speech_queue = queue.Queue()
-        self.is_muted = True  # Start muted until Orchestrator is ready
-        self._stop_fn = None
+        self.is_muted     = True   # muted until Orchestrator calls unmute()
+        self._running     = True
+        self._recognizer  = sr.Recognizer()
 
-        try:
-            self._recognizer = sr.Recognizer()
-            # Slightly more aggressive energy threshold for robot env noise
-            self._recognizer.dynamic_energy_threshold = True
-            self._recognizer.energy_threshold = 400
-
-            mic = sr.Microphone(device_index=MIC_DEVICE_INDEX)
-            with mic as source:
-                # Calibrate for ambient noise once at startup
-                self._recognizer.adjust_for_ambient_noise(source, duration=1)
-
-            # listen_in_background returns a stop function; phrase_time_limit
-            # prevents the thread from blocking forever on one phrase
-            self._stop_fn = self._recognizer.listen_in_background(
-                mic, self._recognized_cb, phrase_time_limit=6
-            )
-            print("[HAL Mic] 🎤 SpeechRecognition Background Queue Listener active.")
-        except Exception as e:
-            print(f"[HAL Mic] ⚠️  Failed to start microphone: {e}")
+        self._thread = threading.Thread(target=self._vad_loop, daemon=True)
+        self._thread.start()
+        print("[HAL Mic] 🎤 sounddevice VAD listener active "
+              f"(device={INPUT_DEVICE_INDEX}, ch={MIC_CHANNELS}).")
 
         self._initialized = True
 
-    def _recognized_cb(self, recognizer: sr.Recognizer, audio: sr.AudioData):
-        """Called in background thread for every detected phrase."""
-        if self.is_muted:
+    # ------------------------------------------------------------------
+    # VAD capture loop (runs in background thread)
+    # ------------------------------------------------------------------
+    def _vad_loop(self):
+        silence_limit = int(
+            self.SILENCE_TIMEOUT_SEC * self.SAMPLE_RATE / self.CHUNK_FRAMES
+        )
+
+        while self._running:
+            if self.is_muted:
+                time.sleep(0.1)
+                continue
+
+            speech_frames   = []
+            silence_counter = 0
+            in_speech       = False
+
+            try:
+                with sd.InputStream(
+                    device=INPUT_DEVICE_INDEX,
+                    channels=MIC_CHANNELS,
+                    samplerate=self.SAMPLE_RATE,
+                    dtype='int16'
+                ) as stream:
+
+                    while self._running and not self.is_muted:
+                        chunk, _ = stream.read(self.CHUNK_FRAMES)
+                        mono     = chunk[:, 0]  # channel 0 = primary mic
+                        rms      = float(np.sqrt(np.mean(mono.astype(np.float32) ** 2)))
+
+                        if rms >= self.SPEECH_RMS_THRESHOLD:
+                            in_speech       = True
+                            silence_counter = 0
+                            speech_frames.append(mono)
+
+                        elif in_speech:
+                            speech_frames.append(mono)  # keep trailing silence
+                            silence_counter += 1
+
+                            if silence_counter >= silence_limit:
+                                # --- phrase complete: ship to STT ---
+                                self._submit_for_stt(speech_frames)
+                                speech_frames   = []
+                                silence_counter = 0
+                                in_speech       = False
+
+            except Exception as e:
+                if self._running:
+                    print(f"[HAL Mic] Stream error: {e} — retrying in 2s")
+                    time.sleep(2)
+
+    def _submit_for_stt(self, frames: list):
+        """Convert collected mono frames to WAV and send to Google STT."""
+        if not frames:
             return
+        pcm = np.concatenate(frames).tobytes()
+
+        # Build an in-memory WAV file
+        buf = io.BytesIO()
+        with wave.open(buf, 'wb') as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)      # int16 = 2 bytes
+            wf.setframerate(self.SAMPLE_RATE)
+            wf.writeframes(pcm)
+        buf.seek(0)
+
         try:
-            text = recognizer.recognize_google(audio).lower().strip()
+            with sr.AudioFile(buf) as source:
+                audio = self._recognizer.record(source)
+            text = self._recognizer.recognize_google(audio).lower().strip()
             if text:
                 print(f"\n[MIC 🎤] Heard: '{text}'")
                 self.speech_queue.put(text)
         except sr.UnknownValueError:
-            pass  # Inaudible / silence
+            pass   # inaudible / silence only
         except sr.RequestError as e:
-            print(f"[HAL Mic] STT request error: {e}")
+            print(f"[HAL Mic] Google STT request error: {e}")
+        except Exception as e:
+            print(f"[HAL Mic] STT error: {e}")
 
+    # ------------------------------------------------------------------
+    # Orchestrator interface (unchanged)
+    # ------------------------------------------------------------------
     def get_speech(self) -> str:
         try:
             return self.speech_queue.get_nowait()
@@ -244,3 +316,5 @@ class JetsonLiDAR:
     def prompt_user(self) -> str:
         time.sleep(5)
         return "SCAN"
+
+

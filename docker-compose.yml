@@ -12,10 +12,16 @@ services:
     # Triggers core/hal.py to load hal_jetson.py
     environment:
       - ENV=PROD_JETSON
-      # ALSA card index for playback (aplay -l to find yours)
+      # ── Speaker ─────────────────────────────────────────
+      # ALSA card for playback. Run `aplay -l` on Jetson to confirm.
       - ALSA_DEVICE=plughw:2,0
-      # PyAudio device index for mic (list with: python -c "import speech_recognition as sr; print(sr.Microphone.list_microphone_names())")
-      - MIC_DEVICE_INDEX=0
+      # ── Microphone (sounddevice, same as utility.py) ────
+      # Capture device index. Run `python -c "import sounddevice as sd; print(sd.query_devices())"` on Jetson.
+      - INPUT_DEVICE_INDEX=26
+      # Channel count for ReSpeaker 4-Mic Array
+      - MIC_CHANNELS=6
+      # RMS energy threshold for VAD — raise if too much noise triggers STT
+      - SPEECH_RMS_THRESHOLD=300
       
     ports:
       - "8000:8000"
