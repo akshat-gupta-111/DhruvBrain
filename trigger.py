@@ -1,0 +1,206 @@
+"""
+Kaggle Moondream Trigger Automation & URL Resolver
+===================================================
+1. Automatically packages llava.py into automated_run.ipynb
+2. Pushes kernel to Kaggle GPU (if not already running)
+3. Streams execution logs to automatically capture the public Ngrok tunnel URL
+4. Returns the active URL and persists it to .env
+"""
+
+import os
+import re
+import sys
+import json
+import time
+import subprocess
+from pathlib import Path
+from typing import Optional
+
+# Ensure UTF-8 printing safely on Windows consoles
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
+BASE_DIR = Path(__file__).parent.resolve()
+KERNEL_ID = "akshatgupta2006/local-automation-test"
+SCRIPT_FILE = BASE_DIR / "llava.py"
+NOTEBOOK_FILE = BASE_DIR / "automated_run.ipynb"
+ENV_FILE = BASE_DIR / ".env"
+
+# Ensure Kaggle credentials are discoverable by Kaggle CLI/API
+KAGGLE_JSON = BASE_DIR / "kaggle.json"
+if KAGGLE_JSON.exists():
+    os.environ["KAGGLE_CONFIG_DIR"] = str(BASE_DIR)
+
+
+def get_kaggle_cmd() -> str:
+    """Finds the kaggle executable, checking PATH and common virtual environments."""
+    venv_kaggle = BASE_DIR.parent / "Trigger" / ".venv" / "Scripts" / "kaggle.exe"
+    if venv_kaggle.exists():
+        return str(venv_kaggle)
+
+    local_venv_kaggle = BASE_DIR / ".venv" / "Scripts" / "kaggle.exe"
+    if local_venv_kaggle.exists():
+        return str(local_venv_kaggle)
+
+    import shutil
+    kaggle_bin = shutil.which("kaggle")
+    if kaggle_bin:
+        return kaggle_bin
+
+    return "kaggle"
+
+
+def run_command(command: str):
+    """Executes a shell command within the script directory."""
+    result = subprocess.run(
+        command,
+        shell=True,
+        text=True,
+        capture_output=True,
+        cwd=str(BASE_DIR)
+    )
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip()
+
+
+def build_automated_notebook() -> bool:
+    """Reads llava.py and wraps it programmatically into a valid Jupyter Notebook."""
+    if not SCRIPT_FILE.exists():
+        print(f"[!] Error: {SCRIPT_FILE} not found locally.")
+        return False
+
+    with open(SCRIPT_FILE, "r", encoding="utf-8") as f:
+        script_content = f.read()
+
+    notebook_data = {
+        "cells": [
+            {
+                "cell_type": "code",
+                "execution_count": None,
+                "metadata": {},
+                "outputs": [],
+                "source": [script_content]
+            }
+        ],
+        "metadata": {
+            "kernelspec": {
+                "display_name": "Python 3",
+                "language": "python",
+                "name": "python3"
+            },
+            "language_info": {
+                "name": "python"
+            }
+        },
+        "nbformat": 4,
+        "nbformat_minor": 2
+    }
+
+    with open(NOTEBOOK_FILE, "w", encoding="utf-8") as f:
+        json.dump(notebook_data, f, indent=2)
+    print("[+] Created automated_run.ipynb with embedded execution code.")
+    return True
+
+
+def update_env_file(ngrok_url: str):
+    """Persists the newly discovered Ngrok URL to the .env file."""
+    if not ENV_FILE.exists():
+        return
+
+    with open(ENV_FILE, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+
+    updated = False
+    new_lines = []
+    for line in lines:
+        if line.startswith("NGROK_BASE_URL="):
+            new_lines.append(f"NGROK_BASE_URL={ngrok_url}\n")
+            updated = True
+        else:
+            new_lines.append(line)
+
+    if not updated:
+        new_lines.append(f"\nNGROK_BASE_URL={ngrok_url}\n")
+
+    with open(ENV_FILE, "w", encoding="utf-8") as f:
+        f.writelines(new_lines)
+    print(f"[+] Updated {ENV_FILE.name} with NGROK_BASE_URL={ngrok_url}")
+
+
+def fetch_active_ngrok_url(timeout_seconds: int = 60) -> Optional[str]:
+    """
+    Connects to Kaggle log stream to automatically extract the live Ngrok tunnel URL.
+    """
+    try:
+        import kaggle
+        os.environ["KAGGLE_CONFIG_DIR"] = str(BASE_DIR)
+        kaggle.api.authenticate()
+
+        print("[*] Scanning Kaggle execution stream for active Ngrok tunnel...")
+        start_time = time.time()
+
+        for event in kaggle.api.kernels_logs_stream(KERNEL_ID):
+            if time.time() - start_time > timeout_seconds:
+                print("[!] Log scanning timeout reached.")
+                break
+
+            text = event.get("data", "")
+            match = re.search(r"https://[a-zA-Z0-9\-]+\.ngrok[a-zA-Z0-9\.\-]+", text)
+            if match:
+                url = match.group(0).rstrip("/.")
+                return url
+
+            if "SERVER ALIVE" in text:
+                break
+    except Exception as e:
+        print(f"[!] Log Stream Notice: {e}")
+    return None
+
+
+def trigger_and_get_url(timeout_seconds: int = 120) -> Optional[str]:
+    """
+    Checks Kaggle status, triggers instance if necessary, and returns active Ngrok URL.
+    """
+    kaggle_bin = get_kaggle_cmd()
+    
+    # 1. Check if kernel is already running
+    status_output = run_command(f'"{kaggle_bin}" kernels status {KERNEL_ID}')
+    is_running = status_output and "running" in status_output.lower()
+
+    if is_running:
+        print(f"[*] Kaggle instance is already RUNNING ({KERNEL_ID}).")
+    else:
+        print("[*] Instance not running. Triggering Kaggle GPU cloud instance...")
+        if not build_automated_notebook():
+            return None
+        push_output = run_command(f'"{kaggle_bin}" kernels push')
+        if not push_output:
+            print("[!] Failed to push to Kaggle. Check credentials or kaggle.json.")
+            return None
+        print(f"[+] Kernel pushed: {push_output}")
+
+    # 2. Extract Ngrok URL from log stream
+    print("[*] Resolving active Ngrok endpoint from Kaggle logs...")
+    url = fetch_active_ngrok_url(timeout_seconds=timeout_seconds)
+
+    if url:
+        print(f"\n[SUCCESS] Inferred Kaggle Ngrok Endpoint: {url}")
+        update_env_file(url)
+        return url
+    else:
+        print("[!] Could not automatically detect Ngrok URL from Kaggle stream.")
+        print("    If the server was just launched, it may need ~45s to install packages and start the tunnel.")
+        return None
+
+
+if __name__ == "__main__":
+    url = trigger_and_get_url()
+    if url:
+        print(f"\nActive Endpoint: {url}")
+    else:
+        print("\nNo endpoint resolved.")

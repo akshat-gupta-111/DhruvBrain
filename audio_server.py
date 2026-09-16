@@ -19,6 +19,8 @@ import io
 import json
 import os
 import subprocess
+import sys
+import subprocess
 import threading
 import time
 import wave
@@ -248,6 +250,13 @@ if __name__ == "__main__":
 
     # Start mic thread
     threading.Thread(target=mic_loop, daemon=True).start()
+
+    # Automatically launch Kaggle Moondream Trigger in the background
+    print("[Audio Server] 🚀 Launching Kaggle Trigger (trigger.py)...")
+    try:
+        subprocess.Popen([sys.executable, "trigger.py"])
+    except Exception as e:
+        print(f"[Audio Server] ⚠️ Failed to launch trigger.py: {e}")
 
     # Start HTTP server
     server = HTTPServer(("0.0.0.0", 5555), AudioHandler)
