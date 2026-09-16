@@ -1,18 +1,12 @@
-import asyncio
-import io
+import json
 import queue
 import sys
 import threading
 import time
 import os
 import glob
-import wave
-import numpy as np
 import cv2
 import serial
-import sounddevice as sd
-import speech_recognition as sr
-import edge_tts
 import subprocess
 
 # ==========================================
@@ -111,126 +105,52 @@ class MotorController:
                 print(f"[HAL Motor] Serial write error: {e}")
 
 # ==========================================
-# 3. Speaker & Mic (Singleton Queue)
+# 3. Speaker & Mic — HTTP Audio Sidecar
 # ==========================================
-# ALSA device name for mpv — override via ALSA_DEVICE in docker-compose.yml
-ALSA_DEVICE = os.getenv("ALSA_DEVICE", "plughw:2,0")
+# All audio runs on the Jetson HOST via audio_server.py (outside Docker).
+# This container is a thin HTTP client — no sounddevice, no ALSA issues.
+# audio_server.py must be running on the host before docker compose up.
 
-# sounddevice indices — from working utility.py configuration
-INPUT_DEVICE_INDEX    = int(os.getenv("INPUT_DEVICE_INDEX",    "26"))  # PulseAudio capture node
-PLAYBACK_DEVICE_INDEX = int(os.getenv("PLAYBACK_DEVICE_INDEX", "24"))  # ReSpeaker hardware speaker
-
-# CHANNELS=2: PulseAudio nodes export stereo (not raw 6-ch ALSA driver)
-# Updated from utility.py: was 6, now 2
-MIC_CHANNELS = int(os.getenv("MIC_CHANNELS", "2"))
+AUDIO_SERVER = os.getenv("AUDIO_SERVER_URL", "http://localhost:5555")
 
 
 class Speaker:
-    """TTS via edge-tts streamed directly to mpv stdin.
-
-    True streaming: mpv starts playing the first audio chunk ~100ms
-    after edge-tts begins synthesis — no temp files, no full synthesis wait.
-    Pipe: edge-tts.stream() → mp3 chunks → mpv stdin → ALSA device
-    Falls back to espeak if mpv/edge-tts fails.
+    """Delegates TTS to audio_server.py running on the Jetson host.
+    POST /speak → host streams edge-tts to the physical speaker.
+    Blocks until playback is complete (same interface as before).
     """
-    VOICE = "en-US-GuyNeural"
 
     def __init__(self):
-        self.alsa_device = ALSA_DEVICE
-        print(f"[HAL Speaker] Edge TTS streaming initialized → mpv → {self.alsa_device}.")
+        print(f"[HAL Speaker] Audio sidecar connected → {AUDIO_SERVER}")
 
     def speak(self, text: str):
         if not text.strip():
             return
         print(f'[SPEAKER 🎙️] "{text}"')
         try:
-            loop = asyncio.new_event_loop()
-            loop.run_until_complete(self._stream_to_mpv(text))
-            loop.close()
-        except Exception as e:
-            print(f"[HAL Speaker] Streaming failed: {e} — falling back to espeak")
-            self._fallback_speak(text)
-
-    async def _stream_to_mpv(self, text: str):
-        """Stream edge-tts MP3 chunks directly into mpv's stdin.
-        mpv buffers ~0.1s then starts playing immediately while chunks arrive.
-        """
-        alsa_mpv = f"alsa/{self.alsa_device}"
-        proc = subprocess.Popen(
-            [
-                "mpv",
-                "--no-terminal",
-                f"--audio-device={alsa_mpv}",
-                "--demuxer=lavf",          # force lavf demuxer for piped MP3
-                "--demuxer-lavf-format=mp3",
-                "-",                       # read from stdin
-            ],
-            stdin=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-        )
-        communicate = edge_tts.Communicate(text, self.VOICE)
-        try:
-            async for chunk in communicate.stream():
-                if chunk["type"] == "audio":
-                    proc.stdin.write(chunk["data"])
-        except BrokenPipeError:
-            pass  # mpv closed early (e.g. very short phrase)
-        finally:
-            try:
-                proc.stdin.close()
-            except Exception:
-                pass
-        proc.wait()  # block until mpv finishes playing
-
-        # Retry without explicit device if mpv failed (device string mismatch)
-        if proc.returncode != 0:
-            proc2 = subprocess.Popen(
-                ["mpv", "--no-terminal", "--demuxer=lavf",
-                 "--demuxer-lavf-format=mp3", "-"],
-                stdin=subprocess.PIPE, stderr=subprocess.DEVNULL
+            import urllib.request
+            body = json.dumps({"text": text}).encode()
+            req  = urllib.request.Request(
+                f"{AUDIO_SERVER}/speak",
+                data=body,
+                headers={"Content-Type": "application/json"},
+                method="POST"
             )
-            communicate2 = edge_tts.Communicate(text, self.VOICE)
-            try:
-                async for chunk in communicate2.stream():
-                    if chunk["type"] == "audio":
-                        proc2.stdin.write(chunk["data"])
-            except BrokenPipeError:
-                pass
-            finally:
-                try:
-                    proc2.stdin.close()
-                except Exception:
-                    pass
-            proc2.wait()
-
-    def _fallback_speak(self, text: str):
-        sanitized = text.replace('"', '\\"')
-        subprocess.run(["espeak", "-ven+f3", "-s150", sanitized])
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                resp.read()
+        except Exception as e:
+            print(f"[HAL Speaker] sidecar error: {e}")
 
 
 class Microphone:
-    """Continuous STT using the exact same sounddevice pattern as utility.py.
-
-    utility.py approach:
-      fuser -k /dev/snd/pcmC2D0c           # flush device locks
-      sd.InputStream(device=26, ch=6) as stream:
-        while running:
-          data_chunk, _ = stream.read(1024)
-          audio_frames.append(data_chunk)
-      full_audio = np.concatenate(audio_frames, axis=0)
-      mono_audio = full_audio[:, 0]         # channel 0 = primary mic
-
-    Here we keep the stream open permanently, collect 4-second chunks,
-    and send each chunk to Google STT when unmuted.
-    Stream never closes on mute — we just discard chunks to avoid device re-init.
+    """Delegates STT to audio_server.py running on the Jetson host.
+    GET  /hear   → returns latest recognised text (non-blocking, "" if none)
+    POST /mute   → tells the server to discard mic input
+    POST /unmute → tells the server to start recognising again
+    Same get_speech() / mute() / unmute() interface — main.py unchanged.
     """
     _instance = None
     _lock     = threading.Lock()
-
-    SAMPLE_RATE      = 16000
-    READ_CHUNK       = 1024                       # exactly as in utility.py
-    STT_SECONDS      = 4                          # seconds per Google STT call
-    STT_FRAMES_TOTAL = STT_SECONDS * SAMPLE_RATE  # frames to collect before sending
 
     def __new__(cls, *args, **kwargs):
         with cls._lock:
@@ -242,131 +162,48 @@ class Microphone:
     def __init__(self):
         if self._initialized:
             return
-
-        self.speech_queue = queue.Queue()
-        self.is_muted     = True    # stays muted until Orchestrator calls unmute()
-        self._running     = True
-        self._recognizer  = sr.Recognizer()
-
-        # Flush device locks exactly as utility.py does
-        os.system("fuser -k /dev/snd/pcmC2D0c 2>/dev/null")
-        time.sleep(0.5)
-
-        self._thread = threading.Thread(target=self._stream_loop, daemon=True)
-        self._thread.start()
-        print(f"[HAL Mic] 🎤 sounddevice listener active "
-              f"(device={INPUT_DEVICE_INDEX}, ch={MIC_CHANNELS}, "
-              f"{self.STT_SECONDS}s chunks → Google STT).")
-
+        self.is_muted = True
+        # Verify audio server is reachable
+        try:
+            import urllib.request
+            with urllib.request.urlopen(f"{AUDIO_SERVER}/health", timeout=3) as r:
+                r.read()
+            print(f"[HAL Mic] 🎤 Audio sidecar connected → {AUDIO_SERVER}")
+        except Exception as e:
+            print(f"[HAL Mic] ⚠️  Audio sidecar not reachable at {AUDIO_SERVER}: {e}")
+            print("[HAL Mic]    → Start audio_server.py on the Jetson before launching Docker.")
         self._initialized = True
 
-    # ------------------------------------------------------------------
-    # Core stream loop — mirrors utility.py's while loop exactly
-    # ------------------------------------------------------------------
-    def _stream_loop(self):
-        while self._running:
-            try:
-                # Open once, keep alive — same as utility.py's `with sd.InputStream`
-                with sd.InputStream(
-                    device=INPUT_DEVICE_INDEX,
-                    channels=MIC_CHANNELS,
-                    samplerate=self.SAMPLE_RATE,
-                    dtype='int16'
-                ) as stream:
-                    print("[HAL Mic] 🔊 Stream opened successfully.")
-
-                    audio_frames  = []
-                    frames_so_far = 0
-
-                    while self._running:
-                        # Read exactly like utility.py: stream.read(1024)
-                        data_chunk, overflowed = stream.read(self.READ_CHUNK)
-                        frames_so_far += len(data_chunk)
-                        audio_frames.append(data_chunk)
-
-                        if frames_so_far < self.STT_FRAMES_TOTAL:
-                            continue  # keep filling the chunk
-
-                        # --- 4 seconds of audio collected ---
-                        # Extract mono channel 0, exactly like utility.py:
-                        #   full_audio = np.concatenate(audio_frames, axis=0)
-                        #   mono_audio = full_audio[:, 0]   if channels > 1
-                        #   mono_audio = full_audio.flatten() if mono
-                        full_audio = np.concatenate(audio_frames, axis=0)
-                        if MIC_CHANNELS > 1:
-                            mono_audio = full_audio[:, 0]
-                        else:
-                            mono_audio = full_audio.flatten()
-
-                        # Reset buffer for next chunk
-                        audio_frames  = []
-                        frames_so_far = 0
-
-                        # Discard if muted (speaker is talking)
-                        if self.is_muted:
-                            continue
-
-                        # Send mono PCM to Google STT in a separate thread
-                        # so we don't block the stream read loop
-                        threading.Thread(
-                            target=self._submit_for_stt,
-                            args=(mono_audio,),
-                            daemon=True
-                        ).start()
-
-            except Exception as e:
-                if self._running:
-                    print(f"[HAL Mic] Stream error: {e} — retrying in 2s")
-                    time.sleep(2)
-                    # Re-flush locks before retry
-                    os.system("fuser -k /dev/snd/pcmC2D0c 2>/dev/null")
-                    time.sleep(0.5)
-
-    # ------------------------------------------------------------------
-    # STT submission — converts mono int16 PCM to WAV, calls Google STT
-    # ------------------------------------------------------------------
-    def _submit_for_stt(self, mono_audio: np.ndarray):
-        """Wraps mono int16 array as in-memory WAV and calls recognize_google."""
-        buf = io.BytesIO()
-        with wave.open(buf, 'wb') as wf:
-            wf.setnchannels(1)
-            wf.setsampwidth(2)          # int16 = 2 bytes, same as utility.py
-            wf.setframerate(self.SAMPLE_RATE)
-            wf.writeframes(mono_audio.tobytes())
-        buf.seek(0)
-
-        try:
-            with sr.AudioFile(buf) as source:
-                audio = self._recognizer.record(source)
-            text = self._recognizer.recognize_google(audio).lower().strip()
-            if text:
-                print(f"\n[MIC 🎤] Heard: '{text}'")
-                self.speech_queue.put(text)
-        except sr.UnknownValueError:
-            pass    # silence or inaudible — perfectly normal
-        except sr.RequestError as e:
-            print(f"[HAL Mic] Google STT error: {e}")
-        except Exception as e:
-            print(f"[HAL Mic] STT error: {e}")
-
-    # ------------------------------------------------------------------
-    # Orchestrator interface (unchanged)
-    # ------------------------------------------------------------------
     def get_speech(self) -> str:
         try:
-            return self.speech_queue.get_nowait()
-        except queue.Empty:
+            import urllib.request
+            with urllib.request.urlopen(f"{AUDIO_SERVER}/hear", timeout=2) as r:
+                data = json.loads(r.read())
+            return data.get("text", "")
+        except Exception:
             return ""
+
+    def _post(self, path: str):
+        try:
+            import urllib.request
+            req = urllib.request.Request(
+                f"{AUDIO_SERVER}{path}",
+                data=b"{}",
+                headers={"Content-Type": "application/json"},
+                method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=3) as r:
+                r.read()
+        except Exception as e:
+            print(f"[HAL Mic] sidecar error on {path}: {e}")
 
     def mute(self):
         self.is_muted = True
-        with self.speech_queue.mutex:
-            self.speech_queue.queue.clear()
+        self._post("/mute")
 
     def unmute(self):
-        with self.speech_queue.mutex:
-            self.speech_queue.queue.clear()
         self.is_muted = False
+        self._post("/unmute")
 
 
 # ==========================================
@@ -376,3 +213,5 @@ class JetsonLiDAR:
     def prompt_user(self) -> str:
         time.sleep(5)
         return "SCAN"
+
+

@@ -1,39 +1,33 @@
 
-
 services:
   dhruv-brain:
     build: .
     container_name: dhruv-brain-container
     restart: unless-stopped
-    
+
     env_file:
       - .env
-      
-    # Triggers core/hal.py to load hal_jetson.py
+
     environment:
       - ENV=PROD_JETSON
-      # ── Speaker ─────────────────────────────────────────
-      # ALSA card for mpv playback. Run `aplay -l` on Jetson to confirm.
-      - ALSA_DEVICE=plughw:2,0
-      # ── Microphone (sounddevice, from utility.py) ────────
-      # Capture device index (PulseAudio node)
-      - INPUT_DEVICE_INDEX=26
-      # Playback device index (ReSpeaker hardware speaker)
-      - PLAYBACK_DEVICE_INDEX=24
-      # PulseAudio nodes export stereo (2), not raw 6-ch ALSA driver
-      - MIC_CHANNELS=2
-      
-    ports:
-      - "8000:8000"
-      
-    # Required to access physical USB and Audio devices
+      # ── Audio Sidecar ─────────────────────────────────────────────
+      # audio_server.py runs on the Jetson HOST (outside Docker).
+      # network_mode: host means localhost here = Jetson localhost.
+      - AUDIO_SERVER_URL=http://localhost:5555
+
+    # host networking: container shares Jetson's network stack directly.
+    # localhost:5555 inside container = audio_server.py on the Jetson host.
+    # This also eliminates the need for port mapping.
+    network_mode: host
+
+    # Required to access physical USB devices
     privileged: true
-    
-    # Map the Jetson's physical hardware directly into the container
+
+    # Map physical hardware into container
     devices:
       - "/dev/video0:/dev/video0"      # USB Webcam
-      - "/dev/ttyACM0:/dev/ttyACM0"    # Arduino Uno R4 
-      - "/dev/snd:/dev/snd"            # Audio Subsystem (Mic/Speaker)
-      
+      - "/dev/ttyACM0:/dev/ttyACM0"   # Arduino Uno R4
+      # /dev/snd intentionally omitted — audio handled on host by audio_server.py
+
     volumes:
       - .:/app
