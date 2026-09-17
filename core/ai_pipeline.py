@@ -37,8 +37,10 @@ memory = AgentState()
 class RobotDecision(BaseModel):
     visual_critique: str = Field(description="Internal monologue evaluating view, framing, distance, and lighting.")
     physical_action: Literal[
-        "APPROACH_0.5M", "BACKUP_0.5M", "PIVOT_LEFT_30", "PIVOT_RIGHT_30", "HALT", "CONTINUE_WANDER"
-    ] = Field(description="Embodied physical action to adjust framing or navigate.")
+        "APPROACH_0.5M", "BACKUP_0.5M", "STRAFE_LEFT", "STRAFE_RIGHT", 
+        "DIAGONAL_FL", "DIAGONAL_FR", "PIVOT_LEFT_30", "PIVOT_RIGHT_30", 
+        "HALT", "CONTINUE_WANDER"
+    ] = Field(description="Embodied physical action to adjust framing or navigate using 8-way omnidirectional mecanum movement.")
     speech: str = Field(description="What the robot speaks aloud. Flirty compliment if human, curious remark if object/text.")
     led_mood: Literal["CURIOSITY_GREEN", "FLIRT_PINK", "ALERT_RED", "THINKING_BLUE", "IDLE_WHITE"]
 

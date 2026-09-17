@@ -11,13 +11,19 @@ BLEStringCharacteristic commandChar("19b10001-e8f2-537e-4f6c-d104768a1214", BLEW
 // Pin Definitions
 const int LED_PIN = 9; // MOSFET triggering the 12V Blue Light
 
-// Motor Pins (Placeholder for L298N or similar)
-const int IN1 = 2;
-const int IN2 = 3;
-const int IN3 = 4;
-const int IN4 = 5;
-
-// State Variables
+// Motor Pins (Assuming 2x L298N for independent 4-wheel control)
+// Front Left
+const int IN1_FL = 2;
+const int IN2_FL = 3;
+// Back Left
+const int IN3_BL = 4;
+const int IN4_BL = 5;
+// Front Right
+const int IN5_FR = 6;
+const int IN6_FR = 7;
+// Back Right
+const int IN7_BR = 8;
+const int IN8_BR = 10;
 String currentMood = "IDLE_WHITE";
 unsigned long previousMillis = 0;
 bool ledState = LOW;
@@ -26,10 +32,14 @@ void setup() {
   Serial.begin(115200);
   
   pinMode(LED_PIN, OUTPUT);
-  pinMode(IN1, OUTPUT);
-  pinMode(IN2, OUTPUT);
-  pinMode(IN3, OUTPUT);
-  pinMode(IN4, OUTPUT);
+  pinMode(IN1_FL, OUTPUT);
+  pinMode(IN2_FL, OUTPUT);
+  pinMode(IN3_BL, OUTPUT);
+  pinMode(IN4_BL, OUTPUT);
+  pinMode(IN5_FR, OUTPUT);
+  pinMode(IN6_FR, OUTPUT);
+  pinMode(IN7_BR, OUTPUT);
+  pinMode(IN8_BR, OUTPUT);
   
   digitalWrite(LED_PIN, LOW);
   stopMotors();
@@ -131,10 +141,58 @@ void parseCommand(String payload) {
 }
 
 void stopMotors() {
-  digitalWrite(IN1, LOW);
-  digitalWrite(IN2, LOW);
-  digitalWrite(IN3, LOW);
-  digitalWrite(IN4, LOW);
+  digitalWrite(IN1_FL, LOW); digitalWrite(IN2_FL, LOW);
+  digitalWrite(IN3_BL, LOW); digitalWrite(IN4_BL, LOW);
+  digitalWrite(IN5_FR, LOW); digitalWrite(IN6_FR, LOW);
+  digitalWrite(IN7_BR, LOW); digitalWrite(IN8_BR, LOW);
+}
+
+void executeMovement(String dir, int speed, int duration) {
+  // Mecanum Drive Logic
+  if (dir == "FWD") {
+    digitalWrite(IN1_FL, HIGH); digitalWrite(IN2_FL, LOW);
+    digitalWrite(IN3_BL, HIGH); digitalWrite(IN4_BL, LOW);
+    digitalWrite(IN5_FR, HIGH); digitalWrite(IN6_FR, LOW);
+    digitalWrite(IN7_BR, HIGH); digitalWrite(IN8_BR, LOW);
+  } else if (dir == "REV") {
+    digitalWrite(IN1_FL, LOW); digitalWrite(IN2_FL, HIGH);
+    digitalWrite(IN3_BL, LOW); digitalWrite(IN4_BL, HIGH);
+    digitalWrite(IN5_FR, LOW); digitalWrite(IN6_FR, HIGH);
+    digitalWrite(IN7_BR, LOW); digitalWrite(IN8_BR, HIGH);
+  } else if (dir == "STRAFE_L") {
+    digitalWrite(IN1_FL, LOW); digitalWrite(IN2_FL, HIGH);
+    digitalWrite(IN3_BL, HIGH); digitalWrite(IN4_BL, LOW);
+    digitalWrite(IN5_FR, HIGH); digitalWrite(IN6_FR, LOW);
+    digitalWrite(IN7_BR, LOW); digitalWrite(IN8_BR, HIGH);
+  } else if (dir == "STRAFE_R") {
+    digitalWrite(IN1_FL, HIGH); digitalWrite(IN2_FL, LOW);
+    digitalWrite(IN3_BL, LOW); digitalWrite(IN4_BL, HIGH);
+    digitalWrite(IN5_FR, LOW); digitalWrite(IN6_FR, HIGH);
+    digitalWrite(IN7_BR, HIGH); digitalWrite(IN8_BR, LOW);
+  } else if (dir == "DIAG_FL") {
+    digitalWrite(IN1_FL, LOW); digitalWrite(IN2_FL, LOW);
+    digitalWrite(IN3_BL, HIGH); digitalWrite(IN4_BL, LOW);
+    digitalWrite(IN5_FR, HIGH); digitalWrite(IN6_FR, LOW);
+    digitalWrite(IN7_BR, LOW); digitalWrite(IN8_BR, LOW);
+  } else if (dir == "DIAG_FR") {
+    digitalWrite(IN1_FL, HIGH); digitalWrite(IN2_FL, LOW);
+    digitalWrite(IN3_BL, LOW); digitalWrite(IN4_BL, LOW);
+    digitalWrite(IN5_FR, LOW); digitalWrite(IN6_FR, LOW);
+    digitalWrite(IN7_BR, HIGH); digitalWrite(IN8_BR, LOW);
+  } else if (dir == "PIVOT_L" || dir == "LEFT") {
+    digitalWrite(IN1_FL, LOW); digitalWrite(IN2_FL, HIGH);
+    digitalWrite(IN3_BL, LOW); digitalWrite(IN4_BL, HIGH);
+    digitalWrite(IN5_FR, HIGH); digitalWrite(IN6_FR, LOW);
+    digitalWrite(IN7_BR, HIGH); digitalWrite(IN8_BR, LOW);
+  } else if (dir == "PIVOT_R" || dir == "RIGHT") {
+    digitalWrite(IN1_FL, HIGH); digitalWrite(IN2_FL, LOW);
+    digitalWrite(IN3_BL, HIGH); digitalWrite(IN4_BL, LOW);
+    digitalWrite(IN5_FR, LOW); digitalWrite(IN6_FR, HIGH);
+    digitalWrite(IN7_BR, LOW); digitalWrite(IN8_BR, HIGH);
+  } else if (dir == "STOP") {
+    stopMotors();
+    return;
+  }
 }
 
 void handleLED() {

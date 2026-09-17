@@ -133,9 +133,13 @@ class MotorController:
     def execute(self, action: str, led_mood: str = "IDLE_WHITE"):
         action_map = {
             "APPROACH_0.5M": ("⬆️  APPROACH (+0.5m)", "<FWD,50,500>"),
-            "BACKUP_0.5M":   ("⬇️  BACKUP   (-0.5m)", "<BWD,50,500>"),
-            "PIVOT_LEFT_30": ("⬅️  PIVOT    (-30°)",  "<LEFT,40,300>"),
-            "PIVOT_RIGHT_30":("➡️  PIVOT    (+30°)",  "<RIGHT,40,300>"),
+            "BACKUP_0.5M":   ("⬇️  BACKUP   (-0.5m)", "<REV,50,500>"),
+            "STRAFE_LEFT":   ("⬅️  STRAFE   (L)",     "<STRAFE_L,50,500>"),
+            "STRAFE_RIGHT":  ("➡️  STRAFE   (R)",     "<STRAFE_R,50,500>"),
+            "DIAGONAL_FL":   ("↖️  DIAG     (FL)",    "<DIAG_FL,50,500>"),
+            "DIAGONAL_FR":   ("↗️  DIAG     (FR)",    "<DIAG_FR,50,500>"),
+            "PIVOT_LEFT_30": ("🔄  PIVOT    (-30°)",  "<PIVOT_L,40,300>"),
+            "PIVOT_RIGHT_30":("🔄  PIVOT    (+30°)",  "<PIVOT_R,40,300>"),
             "HALT":          ("🛑 HALT",             "<STOP>"),
             "CONTINUE_WANDER":("🔄 WANDER",          "<WANDER>")
         }
