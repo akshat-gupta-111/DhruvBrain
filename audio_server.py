@@ -271,10 +271,18 @@ if __name__ == "__main__":
     server = HTTPServer(("0.0.0.0", 5555), AudioHandler)
     print("[Audio Server] ✅ Listening on http://0.0.0.0:5555")
     print("[Audio Server]    Container calls: http://localhost:5555")
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        print("\n[Audio Server] Shutting down.")
+    def shutdown_handler(signum=None, frame=None):
+        print("\n[Audio Server] Shutting down (Signal received).")
         print("[Audio Server] Stopping Kaggle GPU instance gracefully...")
         subprocess.run([sys.executable, "trigger.py", "stop"])
         print("[Audio Server] Goodbye!")
+        os._exit(0)
+
+    import signal
+    signal.signal(signal.SIGTERM, shutdown_handler)
+    signal.signal(signal.SIGINT, shutdown_handler)
+
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        shutdown_handler()
