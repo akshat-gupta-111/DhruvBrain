@@ -314,6 +314,34 @@ def main():
         print(f"\n❌ [CRITICAL ERROR DURING SETUP]: {e}")
         print("Forcing keep-alive loop anyway so you can debug the instance logs...")
 
+    keep_alive()
+
+def monitor_kill_signal():
+    """Polls Ngrok's local API to see if the host requested a shutdown."""
+    import requests
+    import time
+    import os
+    print("[*] Monitoring Ngrok logs for kill signal (/api/kill_dhruv)...")
+    while True:
+        time.sleep(5)
+        try:
+            resp = requests.get("http://localhost:4040/api/requests/http?limit=10", timeout=2)
+            if resp.status_code == 200:
+                data = resp.json()
+                for req in data.get("requests", []):
+                    if "/api/kill_dhruv" in req.get("request", {}).get("uri", ""):
+                        print("\n[💀] Kill signal detected in Ngrok logs! Shutting down Kaggle kernel gracefully.")
+                        os.system("pkill -f ollama")
+                        os._exit(0)
+        except Exception:
+            pass
+
+def keep_alive():
+    """Simple loop to keep the Kaggle script running."""
+    import threading
+    import time
+    threading.Thread(target=monitor_kill_signal, daemon=True).start()
+    
     print("\n🔒 Entering persistent runtime loop. Keeping server alive...")
     counter = 0
     while True:

@@ -68,17 +68,14 @@ def run_command(command: str):
     return result.stdout.strip()
 
 
-def build_automated_notebook(stop_mode=False) -> bool:
+def build_automated_notebook() -> bool:
     """Reads llava.py and wraps it programmatically into a valid Jupyter Notebook."""
-    if stop_mode:
-        script_content = "print('Kernel stopped gracefully.')"
-    else:
-        if not SCRIPT_FILE.exists():
-            print(f"[!] Error: {SCRIPT_FILE} not found locally.")
-            return False
+    if not SCRIPT_FILE.exists():
+        print(f"[!] Error: {SCRIPT_FILE} not found locally.")
+        return False
 
-        with open(SCRIPT_FILE, "r", encoding="utf-8") as f:
-            script_content = f.read()
+    with open(SCRIPT_FILE, "r", encoding="utf-8") as f:
+        script_content = f.read()
 
     notebook_data = {
         "cells": [
@@ -209,11 +206,27 @@ def trigger_and_get_url(timeout_seconds: int = 120) -> Optional[str]:
 
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1].lower() == "stop":
-        print("[*] Gracefully stopping Kaggle kernel...")
-        build_automated_notebook(stop_mode=True)
-        kaggle_bin = get_kaggle_cmd()
-        run_command(f'"{kaggle_bin}" kernels push')
-        print("[+] Stop command sent to Kaggle.")
+        print("[*] Gracefully stopping Kaggle kernel via Ngrok kill-switch...")
+        
+        # Read the NGROK url from .env
+        ngrok_url = None
+        if ENV_FILE.exists():
+            with open(ENV_FILE, "r") as f:
+                for line in f:
+                    if line.startswith("NGROK_BASE_URL="):
+                        ngrok_url = line.split("=", 1)[1].strip()
+                        break
+        
+        if ngrok_url:
+            import requests
+            try:
+                # We expect this to fail/timeout since the server kills itself instantly
+                requests.get(f"{ngrok_url}/api/kill_dhruv", timeout=3)
+            except Exception:
+                pass
+            print("[+] Kill signal sent to Kaggle kernel. The GPU instance will terminate.")
+        else:
+            print("[!] Could not find NGROK_BASE_URL in .env. Is the server running?")
     else:
         url = trigger_and_get_url()
         if url:
