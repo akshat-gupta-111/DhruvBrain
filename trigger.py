@@ -221,7 +221,12 @@ if __name__ == "__main__":
             import requests
             try:
                 # We expect this to fail/timeout since the server kills itself instantly
-                requests.get(f"{ngrok_url}/api/kill_dhruv", timeout=3)
+                # Must include ngrok-skip-browser-warning to bypass the free-tier interstitial page
+                requests.get(
+                    f"{ngrok_url}/api/kill_dhruv", 
+                    headers={"ngrok-skip-browser-warning": "true"}, 
+                    timeout=3
+                )
             except Exception:
                 pass
             print("[+] Kill signal sent to Kaggle kernel. The GPU instance will terminate.")
