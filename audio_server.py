@@ -140,6 +140,11 @@ def _do_speak(text: str):
 
 
 async def _stream_to_mpv(text: str):
+    if not text or not text.strip():
+        print("[Audio Server] Skipped speaking: empty text.")
+        return
+        
+    print(f"[Audio Server] Generating TTS for: '{text}'")
     alsa_mpv = f"alsa/{ALSA_DEVICE}" if ALSA_DEVICE != "pulse" else "pulse"
     proc = subprocess.Popen(
         ["mpv", "--no-terminal", f"--audio-device={alsa_mpv}",
@@ -151,8 +156,12 @@ async def _stream_to_mpv(text: str):
         async for chunk in communicate.stream():
             if chunk["type"] == "audio":
                 proc.stdin.write(chunk["data"])
+    except edge_tts.exceptions.NoAudioReceived:
+        print("[Audio Server] edge-tts Error: No audio received! (Possible network or API issue)")
     except BrokenPipeError:
         pass
+    except Exception as e:
+        print(f"[Audio Server] edge-tts exception: {e}")
     finally:
         try:
             proc.stdin.close()
