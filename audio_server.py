@@ -275,3 +275,6 @@ if __name__ == "__main__":
         server.serve_forever()
     except KeyboardInterrupt:
         print("\n[Audio Server] Shutting down.")
+        print("[Audio Server] Stopping Kaggle GPU instance gracefully...")
+        subprocess.run([sys.executable, "trigger.py", "stop"])
+        print("[Audio Server] Goodbye!")

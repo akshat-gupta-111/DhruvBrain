@@ -1,0 +1,13 @@
+{
+  "id": "akshatgupta2006/local-automation-test",
+  "title": "Local Automation Test",
+  "code_file": "automated_run.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": "true",
+  "enable_gpu": "true",
+  "enable_tpu": "false",
+  "dataset_sources": [],
+  "competition_sources": [],
+  "kernel_sources": []
+}

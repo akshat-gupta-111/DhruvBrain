@@ -68,14 +68,17 @@ def run_command(command: str):
     return result.stdout.strip()
 
 
-def build_automated_notebook() -> bool:
+def build_automated_notebook(stop_mode=False) -> bool:
     """Reads llava.py and wraps it programmatically into a valid Jupyter Notebook."""
-    if not SCRIPT_FILE.exists():
-        print(f"[!] Error: {SCRIPT_FILE} not found locally.")
-        return False
+    if stop_mode:
+        script_content = "print('Kernel stopped gracefully.')"
+    else:
+        if not SCRIPT_FILE.exists():
+            print(f"[!] Error: {SCRIPT_FILE} not found locally.")
+            return False
 
-    with open(SCRIPT_FILE, "r", encoding="utf-8") as f:
-        script_content = f.read()
+        with open(SCRIPT_FILE, "r", encoding="utf-8") as f:
+            script_content = f.read()
 
     notebook_data = {
         "cells": [
@@ -137,7 +140,13 @@ def fetch_active_ngrok_url(timeout_seconds: int = 60) -> Optional[str]:
     Connects to Kaggle log stream to automatically extract the live Ngrok tunnel URL.
     """
     try:
-        import kaggle
+        try:
+            import kaggle
+        except ImportError:
+            print("[!] ERROR: The 'kaggle' python package is not installed.")
+            print("[!] Please run: pip install kaggle")
+            return None
+            
         os.environ["KAGGLE_CONFIG_DIR"] = str(BASE_DIR)
         kaggle.api.authenticate()
 
@@ -199,8 +208,15 @@ def trigger_and_get_url(timeout_seconds: int = 120) -> Optional[str]:
 
 
 if __name__ == "__main__":
-    url = trigger_and_get_url()
-    if url:
-        print(f"\nActive Endpoint: {url}")
+    if len(sys.argv) > 1 and sys.argv[1].lower() == "stop":
+        print("[*] Gracefully stopping Kaggle kernel...")
+        build_automated_notebook(stop_mode=True)
+        kaggle_bin = get_kaggle_cmd()
+        run_command(f'"{kaggle_bin}" kernels push')
+        print("[+] Stop command sent to Kaggle.")
     else:
-        print("\nNo endpoint resolved.")
+        url = trigger_and_get_url()
+        if url:
+            print(f"\nActive Endpoint: {url}")
+        else:
+            print("\nNo endpoint resolved.")
