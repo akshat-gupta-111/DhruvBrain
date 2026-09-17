@@ -184,9 +184,13 @@ def trigger_and_get_url(timeout_seconds: int = 120) -> Optional[str]:
         print("[*] Instance not running. Triggering Kaggle GPU cloud instance...")
         if not build_automated_notebook():
             return None
-        push_output = run_command(f'"{kaggle_bin}" kernels push')
+        
+        # Use sys.executable -m kaggle to bypass PATH issues in systemd boot services
+        push_cmd = f'"{sys.executable}" -m kaggle kernels push -p "{BASE_DIR}"'
+        push_output = run_command(push_cmd)
         if not push_output:
-            print("[!] Failed to push to Kaggle. Check credentials or kaggle.json.")
+            print(f"[!] Failed to push to Kaggle. Command: {push_cmd}")
+            print("[!] Check credentials, kaggle.json, or internet connection.")
             return None
         print(f"[+] Kernel pushed: {push_output}")
 
