@@ -78,6 +78,8 @@ def run_command(command: str):
         cwd=str(BASE_DIR)
     )
     if result.returncode != 0:
+        print(f"[!] Command failed: {command}")
+        print(f"[!] STDERR: {result.stderr.strip()}")
         return None
     return result.stdout.strip()
 
