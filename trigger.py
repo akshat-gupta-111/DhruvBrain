@@ -34,6 +34,20 @@ ENV_FILE = BASE_DIR / ".env"
 KAGGLE_JSON = BASE_DIR / "kaggle.json"
 if KAGGLE_JSON.exists():
     os.environ["KAGGLE_CONFIG_DIR"] = str(BASE_DIR)
+else:
+    # Under systemd boot, HOME might not be set. Try to fallback to explicitly defining the default path
+    if "HOME" not in os.environ:
+        os.environ["KAGGLE_CONFIG_DIR"] = "/home/dhruv/.kaggle"
+
+# Alternatively, parse credentials directly from .env (most robust for systemd)
+if ENV_FILE.exists():
+    with open(ENV_FILE, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line.startswith("KAGGLE_USERNAME="):
+                os.environ["KAGGLE_USERNAME"] = line.split("=", 1)[1].strip()
+            elif line.startswith("KAGGLE_KEY="):
+                os.environ["KAGGLE_KEY"] = line.split("=", 1)[1].strip()
 
 
 def get_kaggle_cmd() -> str:
