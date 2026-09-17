@@ -41,7 +41,7 @@ PLAYBACK_DEVICE_INDEX = parse_device(os.getenv("PLAYBACK_DEVICE_INDEX", "pulse")
 MIC_CHANNELS          = int(os.getenv("MIC_CHANNELS",          "2"))   # PulseAudio → stereo
 SAMPLE_RATE           = 16000
 READ_CHUNK            = 1024                          # matches utility.py
-STT_CHUNK_FRAMES      = 4 * SAMPLE_RATE               # 4-second STT windows
+STT_CHUNK_FRAMES      = 8 * SAMPLE_RATE               # 8-second STT windows to prevent speech cutoff
 ALSA_DEVICE           = os.getenv("ALSA_DEVICE", "pulse")
 TTS_VOICE             = "hi-IN-MadhurNeural"
 
