@@ -64,6 +64,15 @@ def get_kaggle_cmd() -> str:
     kaggle_bin = shutil.which("kaggle")
     if kaggle_bin:
         return kaggle_bin
+        
+    # Explicit fallbacks for systemd environments where PATH is stripped
+    linux_fallback = Path("/home/dhruv/.local/bin/kaggle")
+    if linux_fallback.exists():
+        return str(linux_fallback)
+        
+    linux_global = Path("/usr/local/bin/kaggle")
+    if linux_global.exists():
+        return str(linux_global)
 
     return "kaggle"
 
@@ -215,8 +224,9 @@ def trigger_and_get_url(timeout_seconds: int = 120) -> Optional[str]:
         else:
             print("[!] Warning: Could not reach Kaggle.com. Push may fail.")
 
-        # Use sys.executable -m kaggle to bypass PATH issues in systemd boot services
-        push_cmd = f'"{sys.executable}" -m kaggle kernels push -p "{BASE_DIR}"'
+        # Use resolved kaggle_bin to run the push command
+        kaggle_bin = get_kaggle_cmd()
+        push_cmd = f'"{kaggle_bin}" kernels push -p "{BASE_DIR}"'
         push_output = run_command(push_cmd)
         if not push_output:
             print(f"[!] Failed to push to Kaggle. Command: {push_cmd}")
