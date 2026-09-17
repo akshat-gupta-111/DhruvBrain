@@ -221,13 +221,11 @@ if __name__ == "__main__":
             import requests
             try:
                 print(f"[*] Sending kill ping to: {ngrok_url}/api/kill_dhruv")
-                # Must include ngrok-skip-browser-warning and a User-Agent to bypass the free-tier interstitial page
-                resp = requests.get(
+                # Send exact same headers and method (POST) as ai_pipeline.py to guarantee it reaches Ollama
+                resp = requests.post(
                     f"{ngrok_url}/api/kill_dhruv", 
-                    headers={
-                        "ngrok-skip-browser-warning": "69420",
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                    }, 
+                    headers={"Content-Type": "application/json", "ngrok-skip-browser-warning": "true"}, 
+                    json={},
                     timeout=5
                 )
                 print(f"[+] Kill signal sent. Response status: {resp.status_code}")
