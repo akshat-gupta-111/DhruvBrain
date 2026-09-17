@@ -21,3 +21,4 @@ dlib
 face_recognition
 mediapipe
 bleak
+kaggle>=1.5.16
