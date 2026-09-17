@@ -220,16 +220,20 @@ if __name__ == "__main__":
         if ngrok_url:
             import requests
             try:
-                # We expect this to fail/timeout since the server kills itself instantly
-                # Must include ngrok-skip-browser-warning to bypass the free-tier interstitial page
-                requests.get(
+                print(f"[*] Sending kill ping to: {ngrok_url}/api/kill_dhruv")
+                # Must include ngrok-skip-browser-warning and a User-Agent to bypass the free-tier interstitial page
+                resp = requests.get(
                     f"{ngrok_url}/api/kill_dhruv", 
-                    headers={"ngrok-skip-browser-warning": "true"}, 
-                    timeout=3
+                    headers={
+                        "ngrok-skip-browser-warning": "69420",
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                    }, 
+                    timeout=5
                 )
-            except Exception:
-                pass
-            print("[+] Kill signal sent to Kaggle kernel. The GPU instance will terminate.")
+                print(f"[+] Kill signal sent. Response status: {resp.status_code}")
+            except Exception as e:
+                print(f"[!] Kill request encountered an exception: {e}")
+                print("[+] (This is often expected if the Kaggle server shuts down instantly and drops the connection).")
         else:
             print("[!] Could not find NGROK_BASE_URL in .env. Is the server running?")
     else:
