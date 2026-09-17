@@ -199,6 +199,20 @@ def trigger_and_get_url(timeout_seconds: int = 120) -> Optional[str]:
         if not build_automated_notebook():
             return None
         
+        # Wait for internet before pushing (Crucial for systemd boot)
+        import socket
+        import time
+        print("[*] Waiting for internet connection...")
+        for _ in range(30):
+            try:
+                socket.create_connection(("www.kaggle.com", 443), timeout=2)
+                print("[+] Internet connection established.")
+                break
+            except OSError:
+                time.sleep(2)
+        else:
+            print("[!] Warning: Could not reach Kaggle.com. Push may fail.")
+
         # Use sys.executable -m kaggle to bypass PATH issues in systemd boot services
         push_cmd = f'"{sys.executable}" -m kaggle kernels push -p "{BASE_DIR}"'
         push_output = run_command(push_cmd)
