@@ -2,9 +2,6 @@ import json
 import queue
 import sys
 import threading
-import queue
-import asyncio
-from bleak import BleakClient, BleakScanner
 import time
 import os
 import glob
@@ -73,62 +70,111 @@ class JetsonCamera:
             self.cap.release()
 
 # ==========================================
-# 2. Arduino Motor Controller (BLE)
+# 2. Arduino Motor Controller (USB Cable Link)
 # ==========================================
-BLE_SERVICE_UUID = "19b10000-e8f2-537e-4f6c-d104768a1214"
-BLE_CHAR_UUID = "19b10001-e8f2-537e-4f6c-d104768a1214"
-BLE_DEVICE_NAME = "Dhruv_Arduino"
+SERIAL_BAUDRATE = 115200
+DEFAULT_SERIAL_PORT = "/dev/ttyACM0"
 
 class MotorController:
-    def __init__(self):
+    def __init__(self, port: str = None, baudrate: int = SERIAL_BAUDRATE):
         self.cmd_queue = queue.Queue()
-        self.client = None
+        self.port = port or self._find_arduino_port()
+        self.baudrate = baudrate
+        self.serial = None
         self.connected = False
-        
-        # Start the background BLE worker thread
-        self.ble_thread = threading.Thread(target=self._run_ble_loop, daemon=True)
-        self.ble_thread.start()
+        self.running = True
 
-    def _run_ble_loop(self):
-        """Runs the asyncio event loop for BLE in a background thread."""
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(self._ble_worker())
+        # Start the background Serial worker thread
+        self.serial_thread = threading.Thread(target=self._serial_worker, daemon=True)
+        self.serial_thread.start()
 
-    async def _ble_worker(self):
-        print(f"[HAL Motor] Scanning for BLE device: {BLE_DEVICE_NAME}...")
-        while True:
+    def _find_arduino_port(self) -> str:
+        """Auto-detects Arduino UNO R4 CDC port across Linux and Windows."""
+        for candidate in ["/dev/ttyACM0", "/dev/ttyACM1", "/dev/ttyUSB0", "/dev/ttyUSB1"]:
+            if os.path.exists(candidate):
+                return candidate
+        try:
+            import serial.tools.list_ports
+            for p in serial.tools.list_ports.comports():
+                desc = (p.description or "").lower()
+                hwid = (p.hwid or "").lower()
+                if "arduino" in desc or "uno" in desc or "2341:" in hwid:
+                    return p.device
+            ports = list(serial.tools.list_ports.comports())
+            if ports:
+                return ports[0].device
+        except Exception:
+            pass
+        return DEFAULT_SERIAL_PORT
+
+    def _serial_worker(self):
+        """Background thread handling connection, queue dispatch, and ACK handshake."""
+        while self.running:
             try:
                 if not self.connected:
-                    device = await BleakScanner.find_device_by_name(BLE_DEVICE_NAME, timeout=5.0)
-                    if device:
-                        print(f"[HAL Motor] Found {BLE_DEVICE_NAME}. Connecting...")
-                        self.client = BleakClient(device)
-                        await self.client.connect()
-                        self.connected = True
-                        print(f"[HAL Motor] BLE Connected!")
-                    else:
-                        await asyncio.sleep(2)
-                        continue
+                    active_port = self.port if os.path.exists(self.port) else self._find_arduino_port()
+                    print(f"[HAL Motor] Connecting to Arduino on {active_port} @ {self.baudrate} baud...")
+                    self.serial = serial.Serial(
+                        port=active_port,
+                        baudrate=self.baudrate,
+                        timeout=1.0,
+                        write_timeout=1.0
+                    )
+                    time.sleep(1.8) # Allow Arduino boot reset recovery
+                    self.serial.reset_input_buffer()
+                    self.serial.reset_output_buffer()
+                    self.connected = True
+                    self.port = active_port
+                    print(f"[HAL Motor] USB Serial Connected to Arduino on {self.port}!\n")
 
-                # Check queue for commands (non-blocking)
+                # 1. Process outgoing command from queue
                 try:
-                    payload = self.cmd_queue.get_nowait()
-                    if self.client and self.connected:
-                        await self.client.write_gatt_char(BLE_CHAR_UUID, payload.encode('utf-8'))
+                    payload = self.cmd_queue.get(timeout=0.05)
+                    if not payload.endswith("\n"):
+                        payload += "\n"
+
+                    self.serial.write(payload.encode("utf-8"))
+                    self.serial.flush()
+
+                    # Wait for ACK response from Arduino (max 1.0s)
+                    start_wait = time.time()
+                    while time.time() - start_wait < 1.0:
+                        if self.serial.in_waiting > 0:
+                            line = self.serial.readline().decode("utf-8", errors="replace").strip()
+                            if line == "ACK":
+                                break
+                            elif line:
+                                print(f"[ARDUINO] {line}")
+                                if "MODE: Switched to MANUAL" in line:
+                                    self.clear_queue()
+                        time.sleep(0.01)
+
                 except queue.Empty:
-                    await asyncio.sleep(0.05) # Small sleep to prevent CPU spin
-                    continue
+                    pass
+
+                # 2. Process asynchronous incoming telemetry from Arduino
+                if self.connected and self.serial and self.serial.in_waiting > 0:
+                    line = self.serial.readline().decode("utf-8", errors="replace").strip()
+                    if line:
+                        print(f"[ARDUINO] {line}")
+                        # If Arduino switched to Manual mode, drain queued commands
+                        if "MODE: Switched to MANUAL" in line:
+                            self.clear_queue()
 
             except Exception as e:
-                print(f"[HAL Motor] BLE Error: {e}. Reconnecting...")
+                print(f"[HAL Motor] Serial Error: {e}. Reconnecting in 2s...")
                 self.connected = False
-                if self.client:
+                if self.serial:
                     try:
-                        await self.client.disconnect()
-                    except:
+                        self.serial.close()
+                    except Exception:
                         pass
-                await asyncio.sleep(2)
+                time.sleep(2.0)
+
+    def clear_queue(self):
+        """Purges any pending commands from the queue immediately."""
+        with self.cmd_queue.mutex:
+            self.cmd_queue.queue.clear()
 
     def execute(self, action: str, led_mood: str = "IDLE_WHITE"):
         action_map = {
@@ -147,18 +193,32 @@ class MotorController:
         print(f"[CHASSIS ACTION] {display_text} | 💡 LED: {led_mood}")
 
         full_payload = f"{serial_cmd}|<LED,{led_mood}>\n"
-        # Push to background thread so AI loop never freezes on BLE drop
+        # Push to background thread so AI loop never freezes
         self.cmd_queue.put(full_payload)
+
+    def send_raw(self, raw_cmd: str):
+        """Sends raw command string (e.g. MODE:MANUAL, MODE:AUTO, or custom token)."""
+        clean = raw_cmd.strip()
+        if clean:
+            self.cmd_queue.put(clean + "\n")
+
+    def close(self):
+        self.running = False
+        if self.serial and self.serial.is_open:
+            try:
+                self.send_raw("<STOP>")
+                time.sleep(0.1)
+                self.serial.close()
+            except Exception:
+                pass
 
 # ==========================================
 # 3. Speaker & Mic — HTTP Audio Sidecar
 # ==========================================
 # All audio runs on the Jetson HOST via audio_server.py (outside Docker).
-# This container is a thin HTTP client — no sounddevice, no ALSA issues.
 # audio_server.py must be running on the host before docker compose up.
 
 AUDIO_SERVER = os.getenv("AUDIO_SERVER_URL", "http://localhost:5555")
-
 
 class Speaker:
     """Delegates TTS to audio_server.py running on the Jetson host.
@@ -193,7 +253,6 @@ class Microphone:
     GET  /hear   → returns latest recognised text (non-blocking, "" if none)
     POST /mute   → tells the server to discard mic input
     POST /unmute → tells the server to start recognising again
-    Same get_speech() / mute() / unmute() interface — main.py unchanged.
     """
     _instance = None
     _lock     = threading.Lock()
@@ -209,7 +268,6 @@ class Microphone:
         if self._initialized:
             return
         self.is_muted = True
-        # Verify audio server is reachable
         try:
             import urllib.request
             with urllib.request.urlopen(f"{AUDIO_SERVER}/health", timeout=3) as r:
@@ -270,7 +328,6 @@ class JetsonLiDAR:
         self.port = '/dev/ttyUSB0'
 
     def prompt_user(self) -> str:
-        # Kept for backward compatibility if called
         time.sleep(5)
         return "SCAN"
 
@@ -300,7 +357,7 @@ class JetsonLiDAR:
                     closest_obstacles[sector] = min(distances) if distances else 12000
                     
                 safest_direction = max(closest_obstacles, key=closest_obstacles.get)
-                break # Just read one full 360-degree rotation!
+                break
                 
             lidar.stop()
             lidar.stop_motor()
@@ -313,3 +370,64 @@ class JetsonLiDAR:
             return ""
 
 
+# ==========================================
+# 5. Interactive Standalone Execution
+# ==========================================
+if __name__ == "__main__":
+    port_arg = sys.argv[1] if len(sys.argv) > 1 else None
+    controller = MotorController(port=port_arg)
+    time.sleep(2.0)
+
+    print("-" * 65)
+    print("   DHRUVBRAIN — JETSON SERIAL COMMAND CONSOLE")
+    print("-" * 65)
+    print("Quick Shortcuts:")
+    print("  [1] Forward:  APPROACH_0.5M  (FWD 180, 1000ms)")
+    print("  [2] Backward: BACKUP_0.5M    (REV 180, 1000ms)")
+    print("  [3] Strafe L: STRAFE_LEFT    (STRAFE_L 200, 1000ms)")
+    print("  [4] Strafe R: STRAFE_RIGHT   (STRAFE_R 200, 1000ms)")
+    print("  [5] Pivot L:  PIVOT_LEFT_30  (PIVOT_L 150, 600ms)")
+    print("  [6] Pivot R:  PIVOT_RIGHT_30 (PIVOT_R 150, 600ms)")
+    print("  [0] Halt:     HALT (<STOP>)")
+    print("Modes: 'auto', 'manual', 'status', 'exit'")
+    print("-" * 65)
+
+    try:
+        while True:
+            cmd = input("\n[Jetson Input] > ").strip()
+            if not cmd:
+                continue
+
+            lowered = cmd.lower()
+            if lowered in ["exit", "quit", "q"]:
+                controller.send_raw("<STOP>")
+                break
+            elif lowered in ["auto", "mode:auto"]:
+                controller.clear_queue()
+                controller.send_raw("MODE:AUTO")
+            elif lowered in ["manual", "mode:manual"]:
+                controller.clear_queue()
+                controller.send_raw("MODE:MANUAL")
+            elif lowered in ["status", "mode?"]:
+                controller.send_raw("MODE?")
+            elif cmd == "1":
+                controller.execute("APPROACH_0.5M", "IDLE_WHITE")
+            elif cmd == "2":
+                controller.execute("BACKUP_0.5M", "IDLE_WHITE")
+            elif cmd == "3":
+                controller.execute("STRAFE_LEFT", "IDLE_WHITE")
+            elif cmd == "4":
+                controller.execute("STRAFE_RIGHT", "IDLE_WHITE")
+            elif cmd == "5":
+                controller.execute("PIVOT_LEFT_30", "CURIOSITY_GREEN")
+            elif cmd == "6":
+                controller.execute("PIVOT_RIGHT_30", "CURIOSITY_GREEN")
+            elif cmd == "0":
+                controller.execute("HALT", "ALERT_RED")
+            else:
+                controller.send_raw(cmd)
+
+    except KeyboardInterrupt:
+        controller.send_raw("<STOP>")
+    finally:
+        controller.close()
