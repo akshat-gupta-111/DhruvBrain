@@ -83,6 +83,7 @@ class MotorController:
         self.serial = None
         self.connected = False
         self.running = True
+        self._last_move_duration_ms = 0  # Duration of the last timed motor command (ms)
 
         # Start the background Serial worker thread
         self.serial_thread = threading.Thread(target=self._serial_worker, daemon=True)
@@ -135,6 +136,7 @@ class MotorController:
 
                     self.serial.write(payload.encode("utf-8"))
                     self.serial.flush()
+                    send_time = time.time()
 
                     # Wait for ACK response from Arduino (max 1.0s)
                     start_wait = time.time()
@@ -148,6 +150,18 @@ class MotorController:
                                 if "MODE: Switched to MANUAL" in line:
                                     self.clear_queue()
                         time.sleep(0.01)
+
+                    # KEY FIX: If this was a timed movement command, wait for the
+                    # full duration before allowing the next command to be sent.
+                    # Without this, the next command (even just an LED update) will
+                    # interrupt the motor mid-movement.
+                    move_duration = self._last_move_duration_ms
+                    if move_duration > 0:
+                        elapsed_ms = (time.time() - send_time) * 1000
+                        remaining_ms = move_duration - elapsed_ms
+                        if remaining_ms > 50:  # Only sleep if more than 50ms left
+                            time.sleep(remaining_ms / 1000.0)
+                        self._last_move_duration_ms = 0
 
                 except queue.Empty:
                     pass
@@ -191,6 +205,13 @@ class MotorController:
         }
         display_text, serial_cmd = action_map.get(action, (f"❓ UNKNOWN ({action})", "<STOP>"))
         print(f"[CHASSIS ACTION] {display_text} | 💡 LED: {led_mood}")
+
+        # Parse duration from the serial command so the worker thread knows how
+        # long to wait before dispatching the next command.
+        # Format: <DIR,SPEED,DURATION_MS>
+        import re
+        m = re.search(r'<[^,]+,\d+,(\d+)>', serial_cmd)
+        self._last_move_duration_ms = int(m.group(1)) if m else 0
 
         full_payload = f"{serial_cmd}|<LED,{led_mood}>\n"
         # Push to background thread so AI loop never freezes
