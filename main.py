@@ -116,7 +116,7 @@ class DhruvOrchestrator:
                 self.speaker.play_loop("movement.wav")
             return True
             
-        if any(w in clean_speech for w in ["lidar test", "test lidar"]):
+        if any(w in clean_speech for w in ["lidar test", "test lidar", "lighter test", "leader test", "sensor test", "test sensor"]):
             if self.state != "LIDAR_TEST":
                 if self.state == "FIND_EXIT": self.speaker.stop_loop()
                 self.motors.clear_queue()
