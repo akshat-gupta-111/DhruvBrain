@@ -2,6 +2,10 @@ import time
 import threading
 import uvicorn
 import string
+import requests
+import os
+import signal
+import sys
 from core.dashboard import app
 from core.hal import Camera, Microphone, Speaker, MotorController
 from core.vision_face import FaceIdentityEngine
@@ -255,7 +259,22 @@ class DhruvOrchestrator:
 def start_dashboard():
     uvicorn.run(app, host="0.0.0.0", port=8000, log_level="warning")
 
+def cleanup_audio_server():
+    print("\n[DhruvBrain] Stopping host audio playback...")
+    url = os.getenv("AUDIO_SERVER_URL", "http://localhost:5555")
+    try:
+        requests.post(f"{url}/stop_loop", timeout=1.0)
+    except:
+        pass
+
+def signal_handler(sig, frame):
+    cleanup_audio_server()
+    sys.exit(0)
+
 if __name__ == "__main__":
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
     cam = Camera()
     cam.start_capture_thread()
     threading.Thread(target=start_dashboard, daemon=True).start()
@@ -265,3 +284,5 @@ if __name__ == "__main__":
         orchestrator.run()
     except KeyboardInterrupt:
         print("\n[Master] Shutting down...")
+    finally:
+        cleanup_audio_server()

@@ -449,7 +449,7 @@ class JetsonLiDAR:
                     sector_data = { 'F': [], 'FR': [], 'R': [], 'BR': [], 'B': [], 'BL': [], 'L': [], 'FL': [] }
                     for (_, angle, distance) in scan:
                         if distance > 200:
-                            corrected_angle = (angle + 90.0) % 360.0
+                            corrected_angle = (angle - 90.0) % 360.0
                             sector = get_sector(corrected_angle)
                             if sector:
                                 sector_data[sector].append(distance)
