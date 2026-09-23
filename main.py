@@ -59,6 +59,7 @@ class DhruvOrchestrator:
         if any(w in clean_speech for w in ["hello dhruv", "hello drove", "hey dhruv", "hi dhruv", "hello robot"]):
             if self.state == "FIND_EXIT": 
                 self.speaker.stop_loop()
+            if self.state in ["FIND_EXIT", "LIDAR_TEST"]:
                 self.lidar.stop()
             self.motors.clear_queue()
             self.state = "CONVERSATION"
@@ -85,6 +86,7 @@ class DhruvOrchestrator:
         if any(w in clean_speech for w in ["go explore", "start exploring", "explore"]):
             if self.state == "FIND_EXIT": 
                 self.speaker.stop_loop()
+            if self.state in ["FIND_EXIT", "LIDAR_TEST"]:
                 self.lidar.stop()
             self.motors.clear_queue()
             self.state = "EXPLORATION"
@@ -95,6 +97,7 @@ class DhruvOrchestrator:
         if "sleep" in clean_speech or "shut down" in clean_speech:
             if self.state == "FIND_EXIT": 
                 self.speaker.stop_loop()
+            if self.state in ["FIND_EXIT", "LIDAR_TEST"]:
                 self.lidar.stop()
             self.motors.clear_queue()
             self.state = "IDLE"
@@ -104,12 +107,23 @@ class DhruvOrchestrator:
             
         if any(w in clean_speech for w in ["find exit", "find the exit", "escape the room"]):
             if self.state != "FIND_EXIT":
+                if self.state == "LIDAR_TEST": self.lidar.stop()
                 self.motors.clear_queue()
                 self.state = "FIND_EXIT"
                 self.lidar.start()
                 self.motors.execute("HALT", "ALERT_RED")
                 self.safe_speak("Initiating escape sequence. Scanning for exits.")
                 self.speaker.play_loop("movement.wav")
+            return True
+            
+        if any(w in clean_speech for w in ["lidar test", "test lidar"]):
+            if self.state != "LIDAR_TEST":
+                if self.state == "FIND_EXIT": self.speaker.stop_loop()
+                self.motors.clear_queue()
+                self.state = "LIDAR_TEST"
+                self.lidar.start()
+                self.motors.execute("HALT", "CURIOSITY_GREEN")
+                self.safe_speak("LiDAR test mode activated. Printing distances.")
             return True
             
         return False
@@ -180,6 +194,11 @@ class DhruvOrchestrator:
                 
                 # Stream commands at 10Hz for perfectly smooth continuous movement
                 time.sleep(0.1)
+                
+            elif self.state == "LIDAR_TEST":
+                # Just print the safest direction to the console, don't move motors
+                self.lidar.get_safest_direction()
+                time.sleep(0.5)
                 
             elif self.state == "IDLE":
                 time.sleep(1)
