@@ -430,49 +430,57 @@ class JetsonLiDAR:
             self._thread = None
 
     def _lidar_loop(self):
-        try:
-            from rplidar import RPLidar
-            lidar = RPLidar(self.port, baudrate=115200, timeout=3)
+        from rplidar import RPLidar
+        while self.running:
             try:
-                lidar.stop()
-                lidar.stop_motor()
-                lidar.clean_input()
-            except:
-                pass
-            time.sleep(0.5)
-            
-            for scan in lidar.iter_scans():
-                if not self.running:
-                    break
-                sector_data = { 'F': [], 'FR': [], 'R': [], 'BR': [], 'B': [], 'BL': [], 'L': [], 'FL': [] }
-                for (_, angle, distance) in scan:
-                    # Ignore anything less than 200mm (chassis/wire reflections!)
-                    if distance > 200:
-                        # Electronically rotate the LiDAR 90 degrees clockwise to align 
-                        # its software "Front" (0 deg) with the robot's true physical Front.
-                        corrected_angle = (angle + 90.0) % 360.0
-                        sector = get_sector(corrected_angle)
-                        if sector:
-                            sector_data[sector].append(distance)
-                        
-                closest_obstacles = {}
-                for sector, distances in sector_data.items():
-                    # If the distances array is empty, it means the ENTIRE sector was either 
-                    # blocked (< 200mm) or invalid (0). So it is highly DANGEROUS (0m), not safe!
-                    closest_obstacles[sector] = min(distances) if distances else 0
-                    
-                self.latest_closest_obstacles = closest_obstacles
-                self.latest_safest_direction = max(closest_obstacles, key=closest_obstacles.get)
-                self.latest_obstacles = (f"F:{closest_obstacles['F']/1000:.1f}m, "
-                                         f"B:{closest_obstacles['B']/1000:.1f}m, "
-                                         f"L:{closest_obstacles['L']/1000:.1f}m, "
-                                         f"R:{closest_obstacles['R']/1000:.1f}m | Safest: {self.latest_safest_direction}")
+                lidar = RPLidar(self.port, baudrate=115200, timeout=3)
+                try:
+                    lidar.stop()
+                    lidar.stop_motor()
+                    lidar.clean_input()
+                except:
+                    pass
+                time.sleep(0.5)
                 
-            lidar.stop()
-            lidar.stop_motor()
-            lidar.disconnect()
-        except Exception as e:
-            print(f"[HAL LiDAR] Thread error: {e}")
+                for scan in lidar.iter_scans(max_buf_meas=5000):
+                    if not self.running:
+                        break
+                    
+                    sector_data = { 'F': [], 'FR': [], 'R': [], 'BR': [], 'B': [], 'BL': [], 'L': [], 'FL': [] }
+                    for (_, angle, distance) in scan:
+                        if distance > 200:
+                            corrected_angle = (angle + 90.0) % 360.0
+                            sector = get_sector(corrected_angle)
+                            if sector:
+                                sector_data[sector].append(distance)
+                            
+                    closest_obstacles = {}
+                    for sector, distances in sector_data.items():
+                        closest_obstacles[sector] = min(distances) if distances else 0
+                        
+                    self.latest_closest_obstacles = closest_obstacles
+                    self.latest_safest_direction = max(closest_obstacles, key=closest_obstacles.get)
+                    self.latest_obstacles = (f"F:{closest_obstacles['F']/1000:.1f}m, "
+                                             f"B:{closest_obstacles['B']/1000:.1f}m, "
+                                             f"L:{closest_obstacles['L']/1000:.1f}m, "
+                                             f"R:{closest_obstacles['R']/1000:.1f}m | Safest: {self.latest_safest_direction}")
+                    
+                if not self.running:
+                    lidar.stop()
+                    lidar.stop_motor()
+                    lidar.disconnect()
+                    break
+
+            except Exception as e:
+                print(f"[HAL LiDAR] Data stream interrupted, auto-restarting... ({e})")
+                try:
+                    lidar.stop()
+                    lidar.stop_motor()
+                    lidar.disconnect()
+                except:
+                    pass
+                time.sleep(1.0) # Brief pause before reconnecting
+
 
     def get_safest_direction(self) -> str:
         if not self.running:
