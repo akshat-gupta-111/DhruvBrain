@@ -202,26 +202,24 @@ class MotorController:
         # Reduced durations (600ms) and speeds (150) to prevent crashing into walls
         # Reduced durations (600ms) and speeds (150) to prevent crashing into walls
         action_map = {
-            "APPROACH_0.5M": ("⬆️  APPROACH (+0.5m)", "<REV,150,600>"),
-            "BACKUP_0.5M":   ("⬇️  BACKUP   (-0.5m)", "<FWD,150,600>"),
-            "STRAFE_LEFT":   ("⬅️  STRAFE   (L)",     "<STRAFE_R,150,600>"),
-            "STRAFE_RIGHT":  ("➡️  STRAFE   (R)",     "<STRAFE_L,150,600>"),
-            "DIAGONAL_FL":   ("↖️  DIAG     (FL)",    "<DIAG_BR,150,600>"),
-            "DIAGONAL_FR":   ("↗️  DIAG     (FR)",    "<DIAG_BL,150,600>"),
-            "PIVOT_LEFT_30": ("🔄  PIVOT    (-30°)",  "<PIVOT_R,150,600>"),
-            "PIVOT_RIGHT_30":("🔄  PIVOT    (+30°)",  "<PIVOT_L,150,600>"),
+            "APPROACH_0.5M": ("⬆️  APPROACH (+0.5m)", "<FWD,150,600>"),
+            "BACKUP_0.5M":   ("⬇️  BACKUP   (-0.5m)", "<REV,150,600>"),
+            "STRAFE_LEFT":   ("⬅️  STRAFE   (L)",     "<STRAFE_L,150,600>"),
+            "STRAFE_RIGHT":  ("➡️  STRAFE   (R)",     "<STRAFE_R,150,600>"),
+            "DIAGONAL_FL":   ("↖️  DIAG     (FL)",    "<DIAG_FL,150,600>"),
+            "DIAGONAL_FR":   ("↗️  DIAG     (FR)",    "<DIAG_FR,150,600>"),
+            "PIVOT_LEFT_30": ("🔄  PIVOT    (-30°)",  "<PIVOT_L,150,600>"),
+            "PIVOT_RIGHT_30":("🔄  PIVOT    (+30°)",  "<PIVOT_R,150,600>"),
             
             # Continuous streaming commands for smooth Find Exit navigation (duration=0)
-            "CONT_FWD":      ("⬆️  CONT FWD",         "<REV,150,0>"),
-            "CONT_REV":      ("⬇️  CONT REV",         "<FWD,150,0>"),
-            "CONT_DIAG_FL":  ("↖️  CONT DIAG (FL)",   "<DIAG_BR,150,0>"),
-            "CONT_DIAG_FR":  ("↗️  CONT DIAG (FR)",   "<DIAG_BL,150,0>"),
-            "CONT_PIVOT_L":  ("🔄  CONT PIVOT (L)",   "<PIVOT_R,150,0>"),
-            "CONT_PIVOT_R":  ("🔄  CONT PIVOT (R)",   "<PIVOT_L,150,0>"),
+            "CONT_FWD":      ("⬆️  CONT FWD",         "<FWD,150,0>"),
+            "CONT_REV":      ("⬇️  CONT REV",         "<REV,150,0>"),
+            "CONT_DIAG_FL":  ("↖️  CONT DIAG (FL)",   "<DIAG_FL,150,0>"),
+            "CONT_DIAG_FR":  ("↗️  CONT DIAG (FR)",   "<DIAG_FR,150,0>"),
+            "CONT_PIVOT_L":  ("🔄  CONT PIVOT (L)",   "<PIVOT_L,150,0>"),
+            "CONT_PIVOT_R":  ("🔄  CONT PIVOT (R)",   "<PIVOT_R,150,0>"),
             
-            # LiDAR-specific commands: The LiDAR is facing the true physical front, so these 
-            # bypass the camera-inversions. They also use a 300ms watchdog duration instead of 0 
-            # so the Arduino safely auto-stops if the Jetson crashes or gets stopped!
+            # LiDAR-specific commands
             "LIDAR_FWD":     ("⬆️  LIDAR FWD",       "<FWD,150,300>"),
             "LIDAR_DIAG_FL": ("↖️  LIDAR DIAG (FL)", "<DIAG_FL,150,300>"),
             "LIDAR_DIAG_FR": ("↗️  LIDAR DIAG (FR)", "<DIAG_FR,150,300>"),
@@ -229,7 +227,7 @@ class MotorController:
             "LIDAR_PIVOT_R": ("🔄  LIDAR PIVOT (R)", "<PIVOT_R,150,300>"),
 
             "HALT":          ("🛑 HALT",             "<STOP>"),
-            "CONTINUE_WANDER":("🔄 WANDER",          "<REV,150,1000>")
+            "CONTINUE_WANDER":("🔄 WANDER",          "<FWD,150,1000>")
         }
         display_text, serial_cmd = action_map.get(action, (f"❓ UNKNOWN ({action})", "<STOP>"))
         print(f"[CHASSIS ACTION] {display_text} | 💡 LED: {led_mood}")
