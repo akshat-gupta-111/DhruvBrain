@@ -415,6 +415,10 @@ class JetsonLiDAR:
         self.latest_closest_obstacles = {}
         self._initialized = True
 
+    def prompt_user(self) -> str:
+        time.sleep(5)
+        return "SCAN"
+
     def start(self):
         if self.running: return
         self.running = True
