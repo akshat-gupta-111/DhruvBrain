@@ -18,17 +18,17 @@ def get_exit_action(safest_direction: str) -> Tuple[Optional[str], str]:
     # If it's behind, turn around.
     
     if safest_direction == 'N':
-        return ("CONT_FWD", "CURIOSITY_GREEN")
+        return ("LIDAR_FWD", "CURIOSITY_GREEN")
     elif safest_direction == 'NW':
-        return ("CONT_DIAG_FL", "CURIOSITY_GREEN")
+        return ("LIDAR_DIAG_FL", "CURIOSITY_GREEN")
     elif safest_direction == 'NE':
-        return ("CONT_DIAG_FR", "CURIOSITY_GREEN")
+        return ("LIDAR_DIAG_FR", "CURIOSITY_GREEN")
     elif safest_direction in ['W', 'SW']:
-        return ("CONT_PIVOT_L", "THINKING_BLUE")
+        return ("LIDAR_PIVOT_L", "THINKING_BLUE")
     elif safest_direction in ['E', 'SE']:
-        return ("CONT_PIVOT_R", "THINKING_BLUE")
+        return ("LIDAR_PIVOT_R", "THINKING_BLUE")
     elif safest_direction == 'S':
         # Turn around
-        return ("CONT_PIVOT_R", "ALERT_RED")
+        return ("LIDAR_PIVOT_R", "ALERT_RED")
         
     return (None, "IDLE_WHITE")

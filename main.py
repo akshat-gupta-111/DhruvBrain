@@ -58,6 +58,7 @@ class DhruvOrchestrator:
         
         if any(w in clean_speech for w in ["hello dhruv", "hello drove", "hey dhruv", "hi dhruv", "hello robot"]):
             if self.state == "FIND_EXIT": self.speaker.stop_loop()
+            self.motors.clear_queue()
             self.state = "CONVERSATION"
             self.motors.execute("HALT", "FLIRT_PINK")
             
@@ -81,6 +82,7 @@ class DhruvOrchestrator:
             
         if any(w in clean_speech for w in ["go explore", "start exploring", "explore"]):
             if self.state == "FIND_EXIT": self.speaker.stop_loop()
+            self.motors.clear_queue()
             self.state = "EXPLORATION"
             self.motors.execute("CONTINUE_WANDER", "CURIOSITY_GREEN")
             self.safe_speak("Alright, scanning the perimeter.")
@@ -88,6 +90,7 @@ class DhruvOrchestrator:
             
         if "sleep" in clean_speech or "shut down" in clean_speech:
             if self.state == "FIND_EXIT": self.speaker.stop_loop()
+            self.motors.clear_queue()
             self.state = "IDLE"
             self.motors.execute("HALT", "IDLE_WHITE")
             self.safe_speak("Powering down motors. I'll be listening if you need me.")
@@ -95,6 +98,7 @@ class DhruvOrchestrator:
             
         if any(w in clean_speech for w in ["find exit", "find the exit", "escape the room"]):
             if self.state != "FIND_EXIT":
+                self.motors.clear_queue()
                 self.state = "FIND_EXIT"
                 self.motors.execute("HALT", "ALERT_RED")
                 self.safe_speak("Initiating escape sequence. Scanning for exits.")
@@ -105,7 +109,7 @@ class DhruvOrchestrator:
 
     def run(self):
         print("\n🚀 Starting Dhruv Master Orchestrator...")
-        self.safe_speak("System online. Say 'go explore' for exploration mode, or 'hello Dhruv' for conversation.")
+        self.safe_speak("System online. Say 'go explore' for exploration mode, or 'hello Dhruv' for conversation, or find exit for escape sequence.")
         self.mic.unmute()
 
         while True:

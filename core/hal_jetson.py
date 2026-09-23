@@ -218,6 +218,15 @@ class MotorController:
             "CONT_DIAG_FR":  ("↗️  CONT DIAG (FR)",   "<DIAG_BL,150,0>"),
             "CONT_PIVOT_L":  ("🔄  CONT PIVOT (L)",   "<PIVOT_R,150,0>"),
             "CONT_PIVOT_R":  ("🔄  CONT PIVOT (R)",   "<PIVOT_L,150,0>"),
+            
+            # LiDAR-specific commands: The LiDAR is facing the true physical front, so these 
+            # bypass the camera-inversions. They also use a 300ms watchdog duration instead of 0 
+            # so the Arduino safely auto-stops if the Jetson crashes or gets stopped!
+            "LIDAR_FWD":     ("⬆️  LIDAR FWD",       "<FWD,150,300>"),
+            "LIDAR_DIAG_FL": ("↖️  LIDAR DIAG (FL)", "<DIAG_FL,150,300>"),
+            "LIDAR_DIAG_FR": ("↗️  LIDAR DIAG (FR)", "<DIAG_FR,150,300>"),
+            "LIDAR_PIVOT_L": ("🔄  LIDAR PIVOT (L)", "<PIVOT_L,150,300>"),
+            "LIDAR_PIVOT_R": ("🔄  LIDAR PIVOT (R)", "<PIVOT_R,150,300>"),
 
             "HALT":          ("🛑 HALT",             "<STOP>"),
             "CONTINUE_WANDER":("🔄 WANDER",          "<WANDER>")
