@@ -433,7 +433,10 @@ class JetsonLiDAR:
                 for (_, angle, distance) in scan:
                     # Ignore anything less than 200mm (chassis/wire reflections!)
                     if distance > 200:
-                        sector = get_sector(angle)
+                        # Electronically rotate the LiDAR 90 degrees clockwise to align 
+                        # its software "Front" (0 deg) with the robot's true physical Front.
+                        corrected_angle = (angle + 90.0) % 360.0
+                        sector = get_sector(corrected_angle)
                         if sector:
                             sector_data[sector].append(distance)
                         
