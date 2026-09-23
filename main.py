@@ -59,7 +59,7 @@ class DhruvOrchestrator:
         if any(w in clean_speech for w in ["hello dhruv", "hello drove", "hey dhruv", "hi dhruv", "hello robot"]):
             if self.state == "FIND_EXIT": 
                 self.speaker.stop_loop()
-            if self.state in ["FIND_EXIT", "LIDAR_TEST"]:
+            if self.state in ["FIND_EXIT", "LIDAR_TEST", "EXPLORATION"]:
                 self.lidar.stop()
             self.motors.clear_queue()
             self.state = "CONVERSATION"
@@ -84,20 +84,20 @@ class DhruvOrchestrator:
             return True
             
         if any(w in clean_speech for w in ["go explore", "start exploring", "explore"]):
-            if self.state == "FIND_EXIT": 
-                self.speaker.stop_loop()
-            if self.state in ["FIND_EXIT", "LIDAR_TEST"]:
-                self.lidar.stop()
-            self.motors.clear_queue()
-            self.state = "EXPLORATION"
-            self.motors.execute("CONTINUE_WANDER", "CURIOSITY_GREEN")
-            self.safe_speak("Alright, scanning the perimeter.")
+            if self.state != "EXPLORATION":
+                if self.state == "FIND_EXIT": self.speaker.stop_loop()
+                if self.state in ["FIND_EXIT", "LIDAR_TEST"]: self.lidar.stop()
+                self.motors.clear_queue()
+                self.state = "EXPLORATION"
+                self.lidar.start()
+                self.motors.execute("CONTINUE_WANDER", "CURIOSITY_GREEN")
+                self.safe_speak("Alright, scanning the perimeter.")
             return True
             
         if "sleep" in clean_speech or "shut down" in clean_speech:
             if self.state == "FIND_EXIT": 
                 self.speaker.stop_loop()
-            if self.state in ["FIND_EXIT", "LIDAR_TEST"]:
+            if self.state in ["FIND_EXIT", "LIDAR_TEST", "EXPLORATION"]:
                 self.lidar.stop()
             self.motors.clear_queue()
             self.state = "IDLE"
@@ -107,7 +107,7 @@ class DhruvOrchestrator:
             
         if any(w in clean_speech for w in ["find exit", "find the exit", "escape the room"]):
             if self.state != "FIND_EXIT":
-                if self.state == "LIDAR_TEST": self.lidar.stop()
+                if self.state in ["LIDAR_TEST", "EXPLORATION"]: self.lidar.stop()
                 self.motors.clear_queue()
                 self.state = "FIND_EXIT"
                 self.lidar.start()
@@ -119,6 +119,7 @@ class DhruvOrchestrator:
         if any(w in clean_speech for w in ["activate", "lidar test", "test lidar", "lighter test", "leader test", "sensor test", "test sensor"]):
             if self.state != "LIDAR_TEST":
                 if self.state == "FIND_EXIT": self.speaker.stop_loop()
+                if self.state == "EXPLORATION": self.lidar.stop()
                 self.motors.clear_queue()
                 self.state = "LIDAR_TEST"
                 self.lidar.start()
@@ -130,7 +131,7 @@ class DhruvOrchestrator:
 
     def run(self):
         print("\n🚀 Starting Dhruv Master Orchestrator...")
-        self.safe_speak("System online. Say 'go explore' for exploration mode, or 'hello Dhruv' for conversation, or find exit for escape sequence, or 'test lidar' for testing lidar")
+        self.safe_speak("System online. Say 'go explore' for exploration mode, or 'hello Dhruv' for conversation, or find exit for escape sequence, or 'activate' for testing laidaaaar")
         self.mic.unmute()
 
         while True:

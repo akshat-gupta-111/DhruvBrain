@@ -395,12 +395,24 @@ def get_sector(angle):
     elif 292.5 <= angle < 337.5:         return 'NW'
 
 class JetsonLiDAR:
+    _instance = None
+    _lock = threading.Lock()
+
+    def __new__(cls, *args, **kwargs):
+        with cls._lock:
+            if cls._instance is None:
+                cls._instance = super(JetsonLiDAR, cls).__new__(cls)
+                cls._instance._initialized = False
+            return cls._instance
+
     def __init__(self):
+        if self._initialized: return
         self.port = '/dev/ttyUSB0'
         self.running = False
         self._thread = None
         self.latest_safest_direction = ""
         self.latest_obstacles = ""
+        self._initialized = True
 
     def start(self):
         if self.running: return

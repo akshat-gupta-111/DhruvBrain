@@ -44,8 +44,23 @@ def node_capture(state: RobotState) -> dict:
         
     safest_dir = ""
     if hasattr(lidar, "get_safest_direction"):
-        safest_dir = lidar.get_safest_direction()
-        
+        physical_safe = lidar.get_safest_direction()
+        if physical_safe:
+            # The Camera is facing the rear (Physical Back = LiDAR 'S').
+            # We must translate the LiDAR's Physical Direction to Camera-Relative Direction
+            # so the AI (which only sees through the camera) steers correctly.
+            mapping = {
+                "N": "Back",
+                "S": "Front",
+                "E": "Left",
+                "W": "Right",
+                "NE": "Back-Left",
+                "NW": "Back-Right",
+                "SE": "Front-Left",
+                "SW": "Front-Right"
+            }
+            safest_dir = mapping.get(physical_safe, "")
+            
     return {"image_bytes": frame, "should_quit": False, "wake_word_triggered": False, "perception_text": "", "ocr_text": "", "safest_direction": safest_dir}
 
 def route_after_capture(state: RobotState) -> str:
