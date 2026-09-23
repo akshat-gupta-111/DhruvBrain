@@ -116,7 +116,7 @@ class DhruvOrchestrator:
                 self.speaker.play_loop("movement.wav")
             return True
             
-        if any(w in clean_speech for w in ["lidar test", "test lidar", "lighter test", "leader test", "sensor test", "test sensor"]):
+        if any(w in clean_speech for w in ["activate", "lidar test", "test lidar", "lighter test", "leader test", "sensor test", "test sensor"]):
             if self.state != "LIDAR_TEST":
                 if self.state == "FIND_EXIT": self.speaker.stop_loop()
                 self.motors.clear_queue()
@@ -130,7 +130,7 @@ class DhruvOrchestrator:
 
     def run(self):
         print("\n🚀 Starting Dhruv Master Orchestrator...")
-        self.safe_speak("System online. Say 'go explore' for exploration mode, or 'hello Dhruv' for conversation, or find exit for escape sequence.")
+        self.safe_speak("System online. Say 'go explore' for exploration mode, or 'hello Dhruv' for conversation, or find exit for escape sequence, or 'test lidar' for testing lidar")
         self.mic.unmute()
 
         while True:
