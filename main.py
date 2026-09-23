@@ -166,10 +166,9 @@ class DhruvOrchestrator:
                     
                 if action:
                     self.motors.execute(action, led_mood)
-                    # wait a little bit to allow the motor command to process
-                    time.sleep(0.5)
-                else:
-                    time.sleep(0.1)
+                
+                # Stream commands at 10Hz for perfectly smooth continuous movement
+                time.sleep(0.1)
                 
             elif self.state == "IDLE":
                 time.sleep(1)

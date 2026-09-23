@@ -200,6 +200,7 @@ class MotorController:
 
     def execute(self, action: str, led_mood: str = "IDLE_WHITE"):
         # Reduced durations (600ms) and speeds (150) to prevent crashing into walls
+        # Reduced durations (600ms) and speeds (150) to prevent crashing into walls
         action_map = {
             "APPROACH_0.5M": ("⬆️  APPROACH (+0.5m)", "<REV,150,600>"),
             "BACKUP_0.5M":   ("⬇️  BACKUP   (-0.5m)", "<FWD,150,600>"),
@@ -209,6 +210,15 @@ class MotorController:
             "DIAGONAL_FR":   ("↗️  DIAG     (FR)",    "<DIAG_BL,150,600>"),
             "PIVOT_LEFT_30": ("🔄  PIVOT    (-30°)",  "<PIVOT_R,150,600>"),
             "PIVOT_RIGHT_30":("🔄  PIVOT    (+30°)",  "<PIVOT_L,150,600>"),
+            
+            # Continuous streaming commands for smooth Find Exit navigation (duration=0)
+            "CONT_FWD":      ("⬆️  CONT FWD",         "<REV,150,0>"),
+            "CONT_REV":      ("⬇️  CONT REV",         "<FWD,150,0>"),
+            "CONT_DIAG_FL":  ("↖️  CONT DIAG (FL)",   "<DIAG_BR,150,0>"),
+            "CONT_DIAG_FR":  ("↗️  CONT DIAG (FR)",   "<DIAG_BL,150,0>"),
+            "CONT_PIVOT_L":  ("🔄  CONT PIVOT (L)",   "<PIVOT_R,150,0>"),
+            "CONT_PIVOT_R":  ("🔄  CONT PIVOT (R)",   "<PIVOT_L,150,0>"),
+
             "HALT":          ("🛑 HALT",             "<STOP>"),
             "CONTINUE_WANDER":("🔄 WANDER",          "<WANDER>")
         }
