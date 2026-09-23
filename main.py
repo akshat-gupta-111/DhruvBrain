@@ -215,7 +215,11 @@ class DhruvOrchestrator:
                     ("FORWARD", "<FWD,150,1500>"),
                     ("REVERSE", "<REV,150,1500>"),
                     ("STRAFE LEFT", "<STRAFE_L,150,1500>"),
-                    ("STRAFE RIGHT", "<STRAFE_R,150,1500>")
+                    ("STRAFE RIGHT", "<STRAFE_R,150,1500>"),
+                    ("DIAGONAL FRONT-LEFT", "<DIAG_FL,150,1500>"),
+                    ("DIAGONAL FRONT-RIGHT", "<DIAG_FR,150,1500>"),
+                    ("DIAGONAL BACK-LEFT", "<DIAG_BL,150,1500>"),
+                    ("DIAGONAL BACK-RIGHT", "<DIAG_BR,150,1500>")
                 ]
                 
                 for name, cmd in test_commands:
