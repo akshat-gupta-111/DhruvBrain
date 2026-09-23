@@ -94,10 +94,19 @@ class DhruvOrchestrator:
                 self.safe_speak("Alright, scanning the perimeter.")
             return True
             
+        if "movement" in clean_speech:
+            if self.state in ["FIND_EXIT", "LIDAR_TEST", "EXPLORATION"]:
+                self.lidar.stop()
+                if self.state == "FIND_EXIT": self.speaker.stop_loop()
+            self.motors.clear_queue()
+            self.state = "MOTOR_TEST"
+            self.safe_speak("Starting motor test sequence. Please observe the robot.")
+            return True
+
         if "sleep" in clean_speech or "shut down" in clean_speech:
             if self.state == "FIND_EXIT": 
                 self.speaker.stop_loop()
-            if self.state in ["FIND_EXIT", "LIDAR_TEST", "EXPLORATION"]:
+            if self.state in ["FIND_EXIT", "LIDAR_TEST", "EXPLORATION", "MOTOR_TEST"]:
                 self.lidar.stop()
             self.motors.clear_queue()
             self.state = "IDLE"
@@ -196,6 +205,40 @@ class DhruvOrchestrator:
                 
                 # Stream commands at 10Hz for perfectly smooth continuous movement
                 time.sleep(0.1)
+                
+            elif self.state == "MOTOR_TEST":
+                print("\n========================================")
+                print("       STARTING MOTOR TEST SEQUENCE       ")
+                print("========================================")
+                
+                test_commands = [
+                    ("FORWARD", "<FWD,150,1500>"),
+                    ("REVERSE", "<REV,150,1500>"),
+                    ("STRAFE LEFT", "<STRAFE_L,150,1500>"),
+                    ("STRAFE RIGHT", "<STRAFE_R,150,1500>")
+                ]
+                
+                for name, cmd in test_commands:
+                    print(f"\n[MOTOR TEST] 🚀 Testing Direction: {name}")
+                    print(f"[MOTOR TEST] 💻 Sending raw command: {cmd}")
+                    
+                    self.safe_speak(f"Testing {name}")
+                    self.motors.send_raw(cmd)
+                    
+                    time.sleep(3.0)
+                    
+                    late_speech = self.get_full_speech()
+                    if self.check_for_interrupts(late_speech):
+                        print("\n[MOTOR TEST] Sequence interrupted by user!")
+                        break
+
+                if self.state == "MOTOR_TEST":
+                    print("\n========================================")
+                    print("         MOTOR TEST SEQUENCE DONE         ")
+                    print("========================================")
+                    self.safe_speak("Motor test sequence complete. Entering idle mode.")
+                    self.state = "IDLE"
+
                 
             elif self.state == "LIDAR_TEST":
                 # Just print the safest direction to the console, don't move motors
