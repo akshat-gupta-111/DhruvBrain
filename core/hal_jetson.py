@@ -428,12 +428,18 @@ class JetsonLiDAR:
                     closest_obstacles[sector] = min(distances) if distances else 12000
                     
                 safest_direction = max(closest_obstacles, key=closest_obstacles.get)
+                
+                debug_str = (f"Front:{closest_obstacles['N']/1000:.1f}m, "
+                             f"Back:{closest_obstacles['S']/1000:.1f}m, "
+                             f"Left:{closest_obstacles['W']/1000:.1f}m, "
+                             f"Right:{closest_obstacles['E']/1000:.1f}m")
                 break
                 
             lidar.stop()
             lidar.stop_motor()
             lidar.disconnect()
             
+            print(f"[HAL LiDAR] Obstacles -> {debug_str}")
             print(f"[HAL LiDAR] Safest free-space direction: {safest_direction}")
             return safest_direction
         except Exception as e:
