@@ -442,7 +442,9 @@ class JetsonLiDAR:
                         
                 closest_obstacles = {}
                 for sector, distances in sector_data.items():
-                    closest_obstacles[sector] = min(distances) if distances else 12000
+                    # If the distances array is empty, it means the ENTIRE sector was either 
+                    # blocked (< 200mm) or invalid (0). So it is highly DANGEROUS (0m), not safe!
+                    closest_obstacles[sector] = min(distances) if distances else 0
                     
                 self.latest_safest_direction = max(closest_obstacles, key=closest_obstacles.get)
                 self.latest_obstacles = (f"Front:{closest_obstacles['N']/1000:.1f}m, "
