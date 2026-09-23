@@ -8,6 +8,8 @@ from core.vision_face import FaceIdentityEngine
 
 from modes.exploration.exploration_state import run_exploration_step
 from modes.conversation.conversation_state import generate_chat_response
+from modes.find_exit.find_exit_logic import get_exit_action
+from core.hal_jetson import JetsonLiDAR
 
 class DhruvOrchestrator:
     def __init__(self, camera: Camera):
@@ -16,6 +18,7 @@ class DhruvOrchestrator:
         self.speaker = Speaker()
         self.motors = MotorController()
         self.camera = camera
+        self.lidar = JetsonLiDAR()
         
     def safe_speak(self, text: str):
         """Mutes the mic, speaks, waits for the cloud echo to pass, then unmutes."""
@@ -54,6 +57,7 @@ class DhruvOrchestrator:
         clean_speech = speech.translate(str.maketrans('', '', string.punctuation)).lower()
         
         if any(w in clean_speech for w in ["hello dhruv", "hello drove", "hey dhruv", "hi dhruv", "hello robot"]):
+            if self.state == "FIND_EXIT": self.speaker.stop_loop()
             self.state = "CONVERSATION"
             self.motors.execute("HALT", "FLIRT_PINK")
             
@@ -76,15 +80,25 @@ class DhruvOrchestrator:
             return True
             
         if any(w in clean_speech for w in ["go explore", "start exploring", "explore"]):
+            if self.state == "FIND_EXIT": self.speaker.stop_loop()
             self.state = "EXPLORATION"
             self.motors.execute("CONTINUE_WANDER", "CURIOSITY_GREEN")
             self.safe_speak("Alright, scanning the perimeter.")
             return True
             
         if "sleep" in clean_speech or "shut down" in clean_speech:
+            if self.state == "FIND_EXIT": self.speaker.stop_loop()
             self.state = "IDLE"
             self.motors.execute("HALT", "IDLE_WHITE")
             self.safe_speak("Powering down motors. I'll be listening if you need me.")
+            return True
+            
+        if any(w in clean_speech for w in ["find exit", "find the exit", "escape the room"]):
+            if self.state != "FIND_EXIT":
+                self.state = "FIND_EXIT"
+                self.motors.execute("HALT", "ALERT_RED")
+                self.safe_speak("Initiating escape sequence. Scanning for exits.")
+                self.speaker.play_loop("movement.wav")
             return True
             
         return False
@@ -140,6 +154,22 @@ class DhruvOrchestrator:
                     self.safe_speak(decision.speech)
                     
                 time.sleep(0.5) 
+                
+            elif self.state == "FIND_EXIT":
+                # Fast LiDAR navigation loop (No VLM processing)
+                safest_dir = self.lidar.get_safest_direction()
+                action, led_mood = get_exit_action(safest_dir)
+                
+                late_speech = self.get_full_speech()
+                if self.check_for_interrupts(late_speech):
+                    continue
+                    
+                if action:
+                    self.motors.execute(action, led_mood)
+                    # wait a little bit to allow the motor command to process
+                    time.sleep(0.5)
+                else:
+                    time.sleep(0.1)
                 
             elif self.state == "IDLE":
                 time.sleep(1)

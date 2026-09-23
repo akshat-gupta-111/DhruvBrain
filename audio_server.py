@@ -52,6 +52,9 @@ _is_muted     = True   # start muted; container calls /unmute when ready
 _mic_running  = True
 _recognizer   = sr.Recognizer()
 
+# ── Background audio state ────────────────────────────────────────────
+_loop_proc = None
+
 # ── Mic background thread ─────────────────────────────────────────────
 
 def mic_loop():
@@ -189,6 +192,32 @@ async def _stream_to_mpv(text: str):
         proc2.wait()
 
 
+def _start_loop(filename: str):
+    global _loop_proc
+    _stop_loop()
+    
+    if not os.path.exists(filename):
+        print(f"[Audio Server] Error: {filename} not found for loop playback.")
+        return
+        
+    print(f"[Audio Server] 🔁 Starting audio loop: {filename}")
+    alsa_mpv = f"alsa/{ALSA_DEVICE}" if ALSA_DEVICE != "pulse" else "pulse"
+    _loop_proc = subprocess.Popen(
+        ["mpv", "--no-terminal", f"--audio-device={alsa_mpv}", "--loop-file=inf", filename],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    )
+
+def _stop_loop():
+    global _loop_proc
+    if _loop_proc:
+        print("[Audio Server] ⏹️ Stopping audio loop")
+        _loop_proc.terminate()
+        try:
+            _loop_proc.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            _loop_proc.kill()
+        _loop_proc = None
+
 # ── HTTP Server ───────────────────────────────────────────────────────
 
 class AudioHandler(BaseHTTPRequestHandler):
@@ -230,6 +259,16 @@ class AudioHandler(BaseHTTPRequestHandler):
                 _speech_queue.clear()
             _is_muted = False
             self._send_json({"muted": False})
+
+        elif self.path == "/play_loop":
+            data = self._read_json()
+            filename = data.get("file", "movement.wav")
+            _start_loop(filename)
+            self._send_json({"ok": True})
+            
+        elif self.path == "/stop_loop":
+            _stop_loop()
+            self._send_json({"ok": True})
 
         else:
             self._send_json({"error": "not found"}, 404)

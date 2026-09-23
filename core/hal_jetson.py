@@ -268,6 +268,35 @@ class Speaker:
         except Exception as e:
             print(f"[HAL Speaker] sidecar error: {e}")
 
+    def play_loop(self, filename: str):
+        try:
+            import urllib.request
+            body = json.dumps({"file": filename}).encode()
+            req  = urllib.request.Request(
+                f"{AUDIO_SERVER}/play_loop",
+                data=body,
+                headers={"Content-Type": "application/json"},
+                method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                resp.read()
+        except Exception as e:
+            print(f"[HAL Speaker] play_loop error: {e}")
+
+    def stop_loop(self):
+        try:
+            import urllib.request
+            req  = urllib.request.Request(
+                f"{AUDIO_SERVER}/stop_loop",
+                data=b"{}",
+                headers={"Content-Type": "application/json"},
+                method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                resp.read()
+        except Exception as e:
+            print(f"[HAL Speaker] stop_loop error: {e}")
+
 
 class Microphone:
     """Delegates STT to audio_server.py running on the Jetson host.
