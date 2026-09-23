@@ -229,7 +229,7 @@ class MotorController:
             "LIDAR_PIVOT_R": ("🔄  LIDAR PIVOT (R)", "<PIVOT_R,150,300>"),
 
             "HALT":          ("🛑 HALT",             "<STOP>"),
-            "CONTINUE_WANDER":("🔄 WANDER",          "<WANDER>")
+            "CONTINUE_WANDER":("🔄 WANDER",          "<REV,150,1000>")
         }
         display_text, serial_cmd = action_map.get(action, (f"❓ UNKNOWN ({action})", "<STOP>"))
         print(f"[CHASSIS ACTION] {display_text} | 💡 LED: {led_mood}")

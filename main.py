@@ -90,7 +90,7 @@ class DhruvOrchestrator:
                 self.motors.clear_queue()
                 self.state = "EXPLORATION"
                 self.lidar.start()
-                self.motors.execute("CONTINUE_WANDER", "CURIOSITY_GREEN")
+                self.motors.execute("HALT", "CURIOSITY_GREEN")
                 self.safe_speak("Alright, scanning the perimeter.")
             return True
             
