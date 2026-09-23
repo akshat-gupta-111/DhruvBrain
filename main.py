@@ -24,8 +24,8 @@ class DhruvOrchestrator:
         """Mutes the mic, speaks, waits for the cloud echo to pass, then unmutes."""
         self.mic.mute()
         
-        # Trigger Arduino light blinking without halting motors
-        self.motors.send_raw("<LED,SPEAKING>")
+        # Trigger Arduino light blinking
+        self.motors.execute("HALT", "SPEAKING")
         
         self.speaker.speak(text)
         
@@ -35,7 +35,7 @@ class DhruvOrchestrator:
         self.mic.unmute()
         
         # Return to idle light
-        self.motors.send_raw("<LED,IDLE_WHITE>")
+        self.motors.execute("HALT", "IDLE_WHITE")
 
     def get_full_speech(self) -> str:
         """Drains the queue and combines ALL speech heard, instead of just the last phrase."""
@@ -90,7 +90,7 @@ class DhruvOrchestrator:
                 self.motors.clear_queue()
                 self.state = "EXPLORATION"
                 self.lidar.start()
-                self.motors.execute("HALT", "CURIOSITY_GREEN")
+                self.motors.execute("CONTINUE_WANDER", "CURIOSITY_GREEN")
                 self.safe_speak("Alright, scanning the perimeter.")
             return True
             

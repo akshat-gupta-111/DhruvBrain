@@ -17,24 +17,24 @@ def get_exit_action(safest_direction: str, obstacles: dict = None) -> Tuple[Opti
     # If the path forward has enough clearance (e.g., > 0.6m), we just keep walking forward!
     # We only look for the "safest direction" to turn to if our front is blocked!
     
-    front_dist = obstacles.get('F', 0)
+    front_dist = obstacles.get('N', 0)
     
     if front_dist > 600:
         # Front is safe enough to walk! Just go forward.
         return ("LIDAR_FWD", "CURIOSITY_GREEN")
     
     # If front is blocked (< 600mm), THEN we pivot towards the safest open space!
-    if safest_direction == 'F':
+    if safest_direction == 'N':
         return ("LIDAR_FWD", "CURIOSITY_GREEN")
-    elif safest_direction == 'FL':
+    elif safest_direction == 'NW':
         return ("LIDAR_DIAG_FL", "CURIOSITY_GREEN")
-    elif safest_direction == 'FR':
+    elif safest_direction == 'NE':
         return ("LIDAR_DIAG_FR", "CURIOSITY_GREEN")
-    elif safest_direction in ['L', 'BL']:
+    elif safest_direction in ['W', 'SW']:
         return ("LIDAR_PIVOT_L", "THINKING_BLUE")
-    elif safest_direction in ['R', 'BR']:
+    elif safest_direction in ['E', 'SE']:
         return ("LIDAR_PIVOT_R", "THINKING_BLUE")
-    elif safest_direction == 'B':
+    elif safest_direction == 'S':
         # Turn around
         return ("LIDAR_PIVOT_R", "ALERT_RED")
         
