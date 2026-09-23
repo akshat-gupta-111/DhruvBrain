@@ -19,9 +19,13 @@ def get_exit_action(safest_direction: str) -> Tuple[Optional[str], str]:
     
     if safest_direction == 'N':
         return ("APPROACH_0.5M", "CURIOSITY_GREEN")
-    elif safest_direction in ['NW', 'W', 'SW']:
+    elif safest_direction == 'NW':
+        return ("DIAGONAL_FL", "CURIOSITY_GREEN")
+    elif safest_direction == 'NE':
+        return ("DIAGONAL_FR", "CURIOSITY_GREEN")
+    elif safest_direction in ['W', 'SW']:
         return ("PIVOT_LEFT_30", "THINKING_BLUE")
-    elif safest_direction in ['NE', 'E', 'SE']:
+    elif safest_direction in ['E', 'SE']:
         return ("PIVOT_RIGHT_30", "THINKING_BLUE")
     elif safest_direction == 'S':
         # Turn around
