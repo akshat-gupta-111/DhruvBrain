@@ -76,10 +76,10 @@ const int SPEED_LIMIT = 180;
 const bool DEBUG = true;
 
 // Motor direction inversion flags
-bool M1_INVERT = true;
-bool M2_INVERT = true;
-bool M3_INVERT = false;
-bool M4_INVERT = false;
+bool M1_INVERT = false;
+bool M2_INVERT = false;
+bool M3_INVERT = true;
+bool M4_INVERT = true;
 
 bool testModeActive = false;
 
