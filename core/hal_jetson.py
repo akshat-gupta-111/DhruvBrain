@@ -412,6 +412,7 @@ class JetsonLiDAR:
         self._thread = None
         self.latest_safest_direction = ""
         self.latest_obstacles = ""
+        self.latest_closest_obstacles = {}
         self._initialized = True
 
     def start(self):
@@ -458,6 +459,7 @@ class JetsonLiDAR:
                     # blocked (< 200mm) or invalid (0). So it is highly DANGEROUS (0m), not safe!
                     closest_obstacles[sector] = min(distances) if distances else 0
                     
+                self.latest_closest_obstacles = closest_obstacles
                 self.latest_safest_direction = max(closest_obstacles, key=closest_obstacles.get)
                 self.latest_obstacles = (f"Front:{closest_obstacles['N']/1000:.1f}m, "
                                          f"Back:{closest_obstacles['S']/1000:.1f}m, "
@@ -478,6 +480,9 @@ class JetsonLiDAR:
         if self.latest_safest_direction:
             print(f"[HAL LiDAR] Safest free-space direction: {self.latest_safest_direction}")
         return self.latest_safest_direction
+
+    def get_obstacles(self) -> dict:
+        return self.latest_closest_obstacles
 
 
 # ==========================================

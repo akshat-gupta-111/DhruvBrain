@@ -184,7 +184,8 @@ class DhruvOrchestrator:
             elif self.state == "FIND_EXIT":
                 # Fast LiDAR navigation loop (No VLM processing)
                 safest_dir = self.lidar.get_safest_direction()
-                action, led_mood = get_exit_action(safest_dir)
+                obstacles = self.lidar.get_obstacles()
+                action, led_mood = get_exit_action(safest_dir, obstacles)
                 
                 late_speech = self.get_full_speech()
                 if self.check_for_interrupts(late_speech):
