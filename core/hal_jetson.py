@@ -199,13 +199,14 @@ class MotorController:
             self.cmd_queue.queue.clear()
 
     def execute(self, action: str, led_mood: str = "IDLE_WHITE"):
+        # Reduced durations (600ms) and speeds (150) to prevent crashing into walls
         action_map = {
-            "APPROACH_0.5M": ("⬆️  APPROACH (+0.5m)", "<REV,180,1000>"),
-            "BACKUP_0.5M":   ("⬇️  BACKUP   (-0.5m)", "<FWD,180,1000>"),
-            "STRAFE_LEFT":   ("⬅️  STRAFE   (L)",     "<STRAFE_R,200,1000>"),
-            "STRAFE_RIGHT":  ("➡️  STRAFE   (R)",     "<STRAFE_L,200,1000>"),
-            "DIAGONAL_FL":   ("↖️  DIAG     (FL)",    "<DIAG_BR,200,1000>"),
-            "DIAGONAL_FR":   ("↗️  DIAG     (FR)",    "<DIAG_BL,200,1000>"),
+            "APPROACH_0.5M": ("⬆️  APPROACH (+0.5m)", "<REV,150,600>"),
+            "BACKUP_0.5M":   ("⬇️  BACKUP   (-0.5m)", "<FWD,150,600>"),
+            "STRAFE_LEFT":   ("⬅️  STRAFE   (L)",     "<STRAFE_R,150,600>"),
+            "STRAFE_RIGHT":  ("➡️  STRAFE   (R)",     "<STRAFE_L,150,600>"),
+            "DIAGONAL_FL":   ("↖️  DIAG     (FL)",    "<DIAG_BR,150,600>"),
+            "DIAGONAL_FR":   ("↗️  DIAG     (FR)",    "<DIAG_BL,150,600>"),
             "PIVOT_LEFT_30": ("🔄  PIVOT    (-30°)",  "<PIVOT_R,150,600>"),
             "PIVOT_RIGHT_30":("🔄  PIVOT    (+30°)",  "<PIVOT_L,150,600>"),
             "HALT":          ("🛑 HALT",             "<STOP>"),
