@@ -385,14 +385,14 @@ class Microphone:
 # 4. LiDAR (Autonomous Trigger)
 # ==========================================
 def get_sector(angle):
-    if angle >= 337.5 or angle < 22.5:   return 'N'  
-    elif 22.5 <= angle < 67.5:           return 'NE' 
-    elif 67.5 <= angle < 112.5:          return 'E'  
-    elif 112.5 <= angle < 157.5:         return 'SE' 
-    elif 157.5 <= angle < 202.5:         return 'S'  
-    elif 202.5 <= angle < 247.5:         return 'SW' 
-    elif 247.5 <= angle < 292.5:         return 'W'  
-    elif 292.5 <= angle < 337.5:         return 'NW'
+    if angle >= 337.5 or angle < 22.5:   return 'F'  
+    elif 22.5 <= angle < 67.5:           return 'FR' 
+    elif 67.5 <= angle < 112.5:          return 'R'  
+    elif 112.5 <= angle < 157.5:         return 'BR' 
+    elif 157.5 <= angle < 202.5:         return 'B'  
+    elif 202.5 <= angle < 247.5:         return 'BL' 
+    elif 247.5 <= angle < 292.5:         return 'L'  
+    elif 292.5 <= angle < 337.5:         return 'FL'
 
 class JetsonLiDAR:
     _instance = None
@@ -446,7 +446,7 @@ class JetsonLiDAR:
             for scan in lidar.iter_scans():
                 if not self.running:
                     break
-                sector_data = { 'N': [], 'NE': [], 'E': [], 'SE': [], 'S': [], 'SW': [], 'W': [], 'NW': [] }
+                sector_data = { 'F': [], 'FR': [], 'R': [], 'BR': [], 'B': [], 'BL': [], 'L': [], 'FL': [] }
                 for (_, angle, distance) in scan:
                     # Ignore anything less than 200mm (chassis/wire reflections!)
                     if distance > 200:
@@ -465,10 +465,10 @@ class JetsonLiDAR:
                     
                 self.latest_closest_obstacles = closest_obstacles
                 self.latest_safest_direction = max(closest_obstacles, key=closest_obstacles.get)
-                self.latest_obstacles = (f"Front:{closest_obstacles['N']/1000:.1f}m, "
-                                         f"Back:{closest_obstacles['S']/1000:.1f}m, "
-                                         f"Left:{closest_obstacles['W']/1000:.1f}m, "
-                                         f"Right:{closest_obstacles['E']/1000:.1f}m")
+                self.latest_obstacles = (f"F:{closest_obstacles['F']/1000:.1f}m, "
+                                         f"B:{closest_obstacles['B']/1000:.1f}m, "
+                                         f"L:{closest_obstacles['L']/1000:.1f}m, "
+                                         f"R:{closest_obstacles['R']/1000:.1f}m | Safest: {self.latest_safest_direction}")
                 
             lidar.stop()
             lidar.stop_motor()
@@ -480,9 +480,7 @@ class JetsonLiDAR:
         if not self.running:
             return ""
         if self.latest_obstacles:
-            print(f"[HAL LiDAR] Obstacles -> {self.latest_obstacles}")
-        if self.latest_safest_direction:
-            print(f"[HAL LiDAR] Safest free-space direction: {self.latest_safest_direction}")
+            print(f"[HAL LiDAR] {self.latest_obstacles}")
         return self.latest_safest_direction
 
     def get_obstacles(self) -> dict:
