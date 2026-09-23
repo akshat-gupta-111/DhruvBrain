@@ -57,7 +57,9 @@ class DhruvOrchestrator:
         clean_speech = speech.translate(str.maketrans('', '', string.punctuation)).lower()
         
         if any(w in clean_speech for w in ["hello dhruv", "hello drove", "hey dhruv", "hi dhruv", "hello robot"]):
-            if self.state == "FIND_EXIT": self.speaker.stop_loop()
+            if self.state == "FIND_EXIT": 
+                self.speaker.stop_loop()
+                self.lidar.stop()
             self.motors.clear_queue()
             self.state = "CONVERSATION"
             self.motors.execute("HALT", "FLIRT_PINK")
@@ -81,7 +83,9 @@ class DhruvOrchestrator:
             return True
             
         if any(w in clean_speech for w in ["go explore", "start exploring", "explore"]):
-            if self.state == "FIND_EXIT": self.speaker.stop_loop()
+            if self.state == "FIND_EXIT": 
+                self.speaker.stop_loop()
+                self.lidar.stop()
             self.motors.clear_queue()
             self.state = "EXPLORATION"
             self.motors.execute("CONTINUE_WANDER", "CURIOSITY_GREEN")
@@ -89,7 +93,9 @@ class DhruvOrchestrator:
             return True
             
         if "sleep" in clean_speech or "shut down" in clean_speech:
-            if self.state == "FIND_EXIT": self.speaker.stop_loop()
+            if self.state == "FIND_EXIT": 
+                self.speaker.stop_loop()
+                self.lidar.stop()
             self.motors.clear_queue()
             self.state = "IDLE"
             self.motors.execute("HALT", "IDLE_WHITE")
@@ -100,6 +106,7 @@ class DhruvOrchestrator:
             if self.state != "FIND_EXIT":
                 self.motors.clear_queue()
                 self.state = "FIND_EXIT"
+                self.lidar.start()
                 self.motors.execute("HALT", "ALERT_RED")
                 self.safe_speak("Initiating escape sequence. Scanning for exits.")
                 self.speaker.play_loop("movement.wav")
