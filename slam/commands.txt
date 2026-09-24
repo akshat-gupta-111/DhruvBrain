@@ -1,0 +1,66 @@
+Step 3: Build the ContainerCompile your architecture block straight on the Orin Nano by running:bash
+
+docker build -t jetson_robot_manager .
+
+Step 4: Run & Test Different Modes
+
+docker run -it --privileged --net=host -v /dev:/dev -v ~/:/root/ jetson_robot_manager
+
+
+
+test mapping - ros2 launch nav2_bringup bringup_launch.py map:=/root/my_room_map.yaml use_sim_time:=false
+
+
+
+
+-----
+
+
+# 1. Create and step into your project directory on the Jetson
+mkdir -p ~/robot_project && cd ~/robot_project
+
+# 2. Paste your Dockerfile and robot_manager.py here (from previous steps)
+
+# 3. Build the container image (This takes a few minutes on first run)
+docker build -t jetson_robot_manager .
+
+# 4. Start the interactive container container system
+docker run -it --name=my_robot_app --privileged --net=host -v /dev:/dev -v ~/:/root/ jetson_robot_manager
+
+
+In Terminal 1, type 1 and press Enter to select start_mapping.
+
+
+Terminal 2
+
+
+# 1. Jump inside your already active container
+docker exec -it my_robot_app bash
+
+# 2. Source the underlying ROS 2 Humble commands so the system understands them
+source /opt/ros/humble/setup.bash
+
+# 3. Launch your LiDAR node. (Swap out 'rplidar_ros' with your specific hardware driver)
+ros2 launch rplidar_ros rplidar_node_launch.py
+
+
+
+Terminal 3
+
+
+# 1. Jump inside the container
+docker exec -it my_robot_app bash
+
+# 2. Source the ROS 2 space
+source /opt/ros/humble/setup.bash
+
+# 3. Launch the official slam_toolbox node to start building your room map
+ros2 launch slam_toolbox online_async_launch.py
+
+Verify visual feedback: Go to your Mac desktop web browser and open http://192.168.1.50:8000
+
+
+
+Step 4: Track a Checkpoint DestinationDrive your robot around. Once it reaches a designated spot (e.g., near your desk):Go back to your Mac's Terminal 1 window (the Python interactive menu).Choose choice 2 (set_checkpoint).Type desk_area. The system reads the spatial transformation layout trees (/tf) and logs the position.Step 5: Save your Map FilesOnce the whole room looks clean and completely mapped on your browser stream:In Terminal 1, choose option 3 (save).Type your map file layout prefix: apartment.It automatically executes a map server script and exports apartment_map.yaml, apartment_map.pgm, and apartment_checkpoints.json to your Jetson's home directory.
+
+

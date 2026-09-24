@@ -1,0 +1,111 @@
+================================================================================
+ROS 2 HUMBLE AUTONOMOUS MAPPING & NAVIGATION MASTER GUIDE
+================================================================================
+Target Hardware: NVIDIA Jetson Orin Nano (JetPack 6.x / Ubuntu 22.04)
+Remote Setup: Mac (Terminal / SSH Interface)
+Application Server Port: 8000
+--------------------------------------------------------------------------------
+
+PHASE 1: WORKSPACE CONFIGURATION & CONTROLLING CONTAINER
+--------------------------------------------------------------------------------
+Execute these commands in Terminal 1 on your Mac after accessing your Jetson Nano via SSH.
+
+# 1. Create and move into your project directory on the Jetson
+mkdir -p ~/robot_project && cd ~/robot_project
+
+# [NOTE] Ensure you have written your Dockerfile and robot_manager.py into this folder before proceeding.
+
+# 2. Build the container image (This takes a few minutes on the first run)
+docker build -t jetson_robot_manager .
+
+# 3. Start the interactive container system
+docker run -it --name=my_robot_app --privileged --net=host -v /dev:/dev -v ~/:/root/ jetson_robot_manager
+
+
+PHASE 2: LIVE ROOM MAPPING OPERATIONS
+--------------------------------------------------------------------------------
+
+[Step 1] Initialize the Mapping State
+- Inside the interactive menu displaying in Terminal 1, type 1 and press Enter to select 'start_mapping'.
+
+[Step 2] Boot up the LiDAR Sensor (Inside Docker Execution Context)
+- Open a brand new window or tab on your Mac (Terminal 2), SSH into your Jetson, and execute:
+
+    # 1. Jump inside your already active container
+    docker exec -it my_robot_app bash
+
+    # 2. Source the underlying ROS 2 Humble commands so the system understands them
+    source /opt/ros/humble/setup.bash
+
+    # 3. Launch your LiDAR node. (Swap out 'rplidar_ros' with your specific hardware driver)
+    ros2 launch rplidar_ros rplidar_node_launch.py
+
+[Step 3] Run the SLAM Mapper Graph
+- Open another new tab or window on your Mac (Terminal 3), SSH into your Jetson, and execute:
+
+    # 1. Jump inside the container
+    docker exec -it my_robot_app bash
+
+    # 2. Source the ROS 2 space
+    source /opt/ros/humble/setup.bash
+
+    # 3. Launch the official slam_toolbox node to start building your room map
+    ros2 launch slam_toolbox online_async_launch.py
+
+[Step 4] Verify Visual Feedback
+- Go to your Mac desktop web browser and navigate to:
+  http://192.168.1.50:8000  (Replace 192.168.1.50 with your actual Jetson IP address)
+- You will see the dynamic occupancy grid updating in real-time.
+
+
+PHASE 3: POSITION CHECKPOINTING & MAP PRESERVATION
+--------------------------------------------------------------------------------
+
+[Step 5] Track a Checkpoint Destination
+- Drive your robot around the room. When it reaches a key spot (e.g., near your desk):
+  1. Return to Terminal 1 (The Python interactive menu).
+  2. Choose option 2 (set_checkpoint).
+  3. Enter your target name, such as: desk_area
+- The system reads the spatial transformation trees (/tf) and logs the coordinates.
+
+[Step 6] Save Your Map and Configurations
+- Once the environment is completely captured on your browser view stream:
+  1. Return to Terminal 1 (The Python interactive menu).
+  2. Choose option 3 (save).
+  3. Type your map file layout prefix: apartment
+- The script automatically executes the map server architecture and exports three files directly to your Jetson's home folder:
+  - apartment_map.yaml
+  - apartment_map.pgm
+  - apartment_checkpoints.json
+
+
+PHASE 4: LIVE NAVIGATION & AUTOMATIC OBSTACLE AVOIDANCE TESTING
+--------------------------------------------------------------------------------
+
+[Step 7] Shutdown the Mapping System
+- Navigate to Terminal 3 (where slam_toolbox is actively running).
+- Press [Ctrl + C] on your keyboard to safely stop the SLAM node.
+- Keep Terminal 2 (LiDAR driver) running! The robot needs active laser scans for obstacle mapping.
+
+[Step 8] Fire Up the Navigation Localization Stack
+- Inside Terminal 3 (now cleared and free), execute the following commands to initialize the localization parameters:
+
+    # 1. Jump back inside the container environment
+    docker exec -it my_robot_app bash
+
+    # 2. Source the ROS 2 setup configuration path
+    source /opt/ros/humble/setup.bash
+
+    # 3. Launch the bringup navigation nodes using your newly generated map file
+    ros2 launch nav2_bringup bringup_launch.py map:=/root/apartment_map.yaml use_sim_time:=false
+
+[Step 9] Initialize Robot Pose & Execute Travel
+- If using an RViz visualization layout, select the '2D Pose Estimate' tool once to align the robot's physical layout position onto the mapped room workspace.
+- Return to your original Python application interface menu in Terminal 1.
+- Choose option 4 (test_mapping).
+- Enter the matching configuration details:
+  - Room Map Name: apartment
+  - Target Checkpoint: desk_area
+
+[Result] The Nav2 stack instantly calculates a clean path trajectory. When it encounters unexpected dynamic barriers, its local costmap intercepts the live LiDAR scans and maneuvers around the obstacle seamlessly to arrive safely at your checkpoint.
+================================================================================

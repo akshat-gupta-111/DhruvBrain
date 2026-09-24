@@ -1,0 +1,24 @@
+# Official NVIDIA L4T image pre-configured with ROS 2 Humble for JetPack 6
+FROM dustynv/ros:humble-ros-base-l4t-r36.2.0
+
+# Set ambient variables
+ENV DEBIAN_FRONTEND=noninteractive
+WORKDIR /workspace
+
+# Install Navigation, SLAM packages, and Python Image processing libraries
+RUN apt-get update && apt-get install -y \
+    ros-humble-nav2-simple-commander \
+    ros-humble-nav2-map-server \
+    ros-humble-slam-toolbox \
+    ros-humble-nav2-bringup \
+    python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip3 install pillow
+
+# Copy the application manager into the image workspace
+COPY robot_manager.py /workspace/robot_manager.py
+RUN chmod +x /workspace/robot_manager.py
+
+# Default entry execution path
+CMD ["python3", "/workspace/robot_manager.py"]
