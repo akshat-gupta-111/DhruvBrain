@@ -68,6 +68,7 @@ RUN set -eux; \
 # 4. Install ROS navigation and SLAM packages
 # -------------------------------------------------
 
+# Install ROS 2 navigation, SLAM and build dependencies
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
       ros-humble-nav2-simple-commander \
@@ -75,7 +76,6 @@ RUN apt-get update && \
       ros-humble-nav2-bringup \
       ros-humble-slam-toolbox \
       ros-humble-eigen3-cmake-module \
-      ros-humble-cmake-modules \
       ros-humble-tf2-geometry-msgs \
       python3-colcon-common-extensions \
       libeigen3-dev \
