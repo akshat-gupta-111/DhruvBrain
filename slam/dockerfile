@@ -1,44 +1,151 @@
 
-# NVIDIA L4T image with ROS 2 Humble for JetPack 6
+# NVIDIA Jetson / JetPack 6 / ROS 2 Humble
 FROM dustynv/ros:humble-ros-base-l4t-r36.2.0
 
-ENV DEBIAN_FRONTEND=noninteractive
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    ROS_DISTRO=humble \
+    ROS_WS=/workspace/rf2o_ws \
+    PYTHONUNBUFFERED=1
+
 WORKDIR /workspace
 
-# Install ROS 2 navigation, SLAM and build dependencies
-RUN apt-get update && apt-get install -y \
-    ros-humble-nav2-simple-commander \
-    ros-humble-nav2-map-server \
-    ros-humble-slam-toolbox \
-    ros-humble-nav2-bringup \
-    python3-pip \
-    python3-colcon-common-extensions \
-    libeigen3-dev \
-    git \
-    build-essential \
+# -------------------------------------------------
+# 1. Remove old ROS 2 APT repository configuration
+# -------------------------------------------------
+# The base image may contain an expired signing key.
+# Remove legacy ROS 2 sources before apt-get update.
+
+RUN set -eux; \
+    rm -f \
+      /etc/apt/sources.list.d/ros2.list \
+      /etc/apt/sources.list.d/ros2-latest.list \
+      /etc/apt/sources.list.d/ros2.sources; \
+    rm -f \
+      /usr/share/keyrings/ros-archive-keyring.gpg \
+      /usr/share/keyrings/ros2-latest-archive-keyring.gpg; \
+    if [ -f /etc/apt/sources.list ]; then \
+      sed -i '\|packages.ros.org/ros2/ubuntu|d' \
+        /etc/apt/sources.list; \
+    fi
+
+# -------------------------------------------------
+# 2. Install prerequisites
+# -------------------------------------------------
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+      ca-certificates \
+      curl \
+      git \
+      gnupg \
+      build-essential \
+      python3-pip \
+      software-properties-common \
     && rm -rf /var/lib/apt/lists/*
 
-# Python dependencies
-RUN pip3 install pillow
+# -------------------------------------------------
+# 3. Install official ROS 2 repository configuration
+# -------------------------------------------------
 
-# Clone RF2O ROS 2 branch and build
-RUN mkdir -p /workspace/rf2o_ws/src && \
-    cd /workspace/rf2o_ws/src && \
-    git clone --depth 1 --branch ros2 \
-    https://github.com/MAPIRlab/rf2o_laser_odometry.git && \
-    cd /workspace/rf2o_ws && \
-    . /opt/ros/humble/setup.sh && \
-    colcon build --symlink-install
+RUN set -eux; \
+    source /etc/os-release; \
+    test "${VERSION_CODENAME}" = "jammy"; \
+    ROS_APT_SOURCE_VERSION=$( \
+      curl -fsSL --retry 5 \
+      https://api.github.com/repos/ros-infrastructure/ros-apt-source/releases/latest \
+      | python3 -c \
+        'import json,sys; print(json.load(sys.stdin)["tag_name"])' \
+    ); \
+    curl -fL --retry 5 \
+      "https://github.com/ros-infrastructure/ros-apt-source/releases/download/${ROS_APT_SOURCE_VERSION}/ros2-apt-source_${ROS_APT_SOURCE_VERSION}.jammy_all.deb" \
+      -o /tmp/ros2-apt-source.deb; \
+    dpkg -i /tmp/ros2-apt-source.deb; \
+    rm -f /tmp/ros2-apt-source.deb
 
-# Copy robot manager
+# -------------------------------------------------
+# 4. Install ROS navigation and SLAM packages
+# -------------------------------------------------
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+      ros-humble-nav2-simple-commander \
+      ros-humble-nav2-map-server \
+      ros-humble-nav2-bringup \
+      ros-humble-slam-toolbox \
+      ros-humble-eigen3-cmake-module \
+      ros-humble-cmake-modules \
+      ros-humble-tf2-geometry-msgs \
+      python3-colcon-common-extensions \
+      libeigen3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# -------------------------------------------------
+# 5. Python dependencies
+# -------------------------------------------------
+
+RUN python3 -m pip install \
+      --no-cache-dir \
+      Pillow
+
+# -------------------------------------------------
+# 6. Clone RF2O ROS 2 repository
+# -------------------------------------------------
+
+RUN mkdir -p "${ROS_WS}/src" && \
+    git clone \
+      --depth 1 \
+      --branch ros2 \
+      https://github.com/MAPIRlab/rf2o_laser_odometry.git \
+      "${ROS_WS}/src/rf2o_laser_odometry"
+
+# -------------------------------------------------
+# 7. Build RF2O
+# -------------------------------------------------
+
+WORKDIR /workspace/rf2o_ws
+
+RUN source /opt/ros/humble/setup.bash && \
+    colcon build \
+      --symlink-install \
+      --event-handlers console_direct+
+
+# -------------------------------------------------
+# 8. Verify ROS packages and RF2O installation
+# -------------------------------------------------
+
+RUN source /opt/ros/humble/setup.bash && \
+    source /workspace/rf2o_ws/install/setup.bash && \
+    ros2 pkg prefix rf2o_laser_odometry && \
+    ros2 pkg prefix slam_toolbox && \
+    ros2 pkg prefix nav2_map_server && \
+    ros2 pkg prefix nav2_bringup
+
+# -------------------------------------------------
+# 9. Copy robot manager
+# -------------------------------------------------
+
+WORKDIR /workspace
+
 COPY robot_manager.py /workspace/robot_manager.py
-RUN chmod +x /workspace/robot_manager.py
 
-# Source ROS automatically in interactive Bash shells
-RUN echo "source /opt/ros/humble/setup.bash" >> /root/.bashrc && \
-    echo "source /workspace/rf2o_ws/install/setup.bash" >> /root/.bashrc
+RUN chmod +x /workspace/robot_manager.py && \
+    python3 -m py_compile /workspace/robot_manager.py
 
-# Source ROS before starting the robot manager
+# -------------------------------------------------
+# 10. Automatically source ROS in interactive shells
+# -------------------------------------------------
+
+RUN printf '%s\n' \
+    'source /opt/ros/humble/setup.bash' \
+    'source /workspace/rf2o_ws/install/setup.bash' \
+    >> /root/.bashrc
+
+# -------------------------------------------------
+# 11. Start robot manager with ROS environment
+# -------------------------------------------------
+
 CMD ["/bin/bash", "-c", \
      "source /opt/ros/humble/setup.bash && \
       source /workspace/rf2o_ws/install/setup.bash && \
