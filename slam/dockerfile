@@ -1,24 +1,45 @@
-# Official NVIDIA L4T image pre-configured with ROS 2 Humble for JetPack 6
+
+# NVIDIA L4T image with ROS 2 Humble for JetPack 6
 FROM dustynv/ros:humble-ros-base-l4t-r36.2.0
 
-# Set ambient variables
 ENV DEBIAN_FRONTEND=noninteractive
 WORKDIR /workspace
 
-# Install Navigation, SLAM packages, and Python Image processing libraries
+# Install ROS 2 navigation, SLAM and build dependencies
 RUN apt-get update && apt-get install -y \
     ros-humble-nav2-simple-commander \
     ros-humble-nav2-map-server \
     ros-humble-slam-toolbox \
     ros-humble-nav2-bringup \
     python3-pip \
+    python3-colcon-common-extensions \
+    libeigen3-dev \
+    git \
+    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
+# Python dependencies
 RUN pip3 install pillow
 
-# Copy the application manager into the image workspace
+# Clone RF2O ROS 2 branch and build
+RUN mkdir -p /workspace/rf2o_ws/src && \
+    cd /workspace/rf2o_ws/src && \
+    git clone --depth 1 --branch ros2 \
+    https://github.com/MAPIRlab/rf2o_laser_odometry.git && \
+    cd /workspace/rf2o_ws && \
+    . /opt/ros/humble/setup.sh && \
+    colcon build --symlink-install
+
+# Copy robot manager
 COPY robot_manager.py /workspace/robot_manager.py
 RUN chmod +x /workspace/robot_manager.py
 
-# Default entry execution path
-CMD ["python3", "/workspace/robot_manager.py"]
+# Source ROS automatically in interactive Bash shells
+RUN echo "source /opt/ros/humble/setup.bash" >> /root/.bashrc && \
+    echo "source /workspace/rf2o_ws/install/setup.bash" >> /root/.bashrc
+
+# Source ROS before starting the robot manager
+CMD ["/bin/bash", "-c", \
+     "source /opt/ros/humble/setup.bash && \
+      source /workspace/rf2o_ws/install/setup.bash && \
+      exec python3 /workspace/robot_manager.py"]

@@ -1,66 +1,97 @@
-Step 3: Build the ContainerCompile your architecture block straight on the Orin Nano by running:bash
+================================================================================
+  JETSON ORIN NANO + MAC SSH: COMPLETE ROS 2 MASTER OPERATION GUIDE
+  METHOD B: SYSTEM TRACKING WITH LIDAR-BASED SOFTWARE ODOMETRY (RF2O)
+================================================================================
 
-docker build -t jetson_robot_manager .
+[PREREQUISITES]
+1. Your Mac and Jetson Orin Nano must be connected to the exact same local Wi-Fi router.
+2. The Jetson must have the NVIDIA Container Toolkit configured.
+3. Keep all coordinates strictly hardcoded to '/root/' inside the system.
 
-Step 4: Run & Test Different Modes
+--------------------------------------------------------------------------------
+PHASE 1: MULTI-TERMINAL CONNECTION MANAGEMENT FROM YOUR MAC
+--------------------------------------------------------------------------------
+Open three or four independent tabs/windows in your Mac Terminal app and connect via SSH:
 
-docker run -it --privileged --net=host -v /dev:/dev -v ~/:/root/ jetson_robot_manager
+- Terminal 1 (Main Interactive Program):
+  ssh jetson@<YOUR_JETSON_IP>
 
+- Terminal 2 (LiDAR Sensor Node):
+  ssh jetson@<YOUR_JETSON_IP>
 
+- Terminal 3 (Laser Odometry Node):
+  ssh jetson@<YOUR_JETSON_IP>
 
-test mapping - ros2 launch nav2_bringup bringup_launch.py map:=/root/my_room_map.yaml use_sim_time:=false
+- Terminal 4 (SLAM Toolbox Mapper / Nav2 Engine Launcher):
+  ssh jetson@<YOUR_JETSON_IP>
 
+--------------------------------------------------------------------------------
+PHASE 2: BUILD AND INITIALIZE DETACHED SYSTEM LAYERS
+--------------------------------------------------------------------------------
+Execute the following setup commands inside Terminal 1:
 
-
-
------
-
-
-# 1. Create and step into your project directory on the Jetson
+# 1. Access your target directory layout
 mkdir -p ~/robot_project && cd ~/robot_project
 
-# 2. Paste your Dockerfile and robot_manager.py here (from previous steps)
-
-# 3. Build the container image (This takes a few minutes on first run)
+# 2. Build the structural image block (Compiles ROS 2 dependencies and rf2o_laser_odometry)
 docker build -t jetson_robot_manager .
 
-# 4. Start the interactive container container system
+# 3. Spin up the primary interactive system instance
 docker run -it --name=my_robot_app --privileged --net=host -v /dev:/dev -v ~/:/root/ jetson_robot_manager
 
+*Terminal 1 will clear and lock onto the Python selection menu (Options 1-5).*
 
-In Terminal 1, type 1 and press Enter to select start_mapping.
+--------------------------------------------------------------------------------
+PHASE 3: RUN THE ACTIVE MAPPING PIPELINE
+--------------------------------------------------------------------------------
+Follow these steps exactly to discover and record layout points in real-time:
 
+Step 1 [Terminal 1]: Type '1' and press Enter to select 'start_mapping'.
 
-Terminal 2
+Step 2 [Terminal 2]: Route into the core thread container and boot your LiDAR:
+  docker exec -it my_robot_app bash
+  ros2 launch rplidar_ros rplidar_node_launch.py
 
+Step 3 [Terminal 3]: Route into the container and boot the Software Odometry tracking node:
+  docker exec -it my_robot_app bash
+  ros2 run rf2o_laser_odometry rf2o_laser_odometry_node --ros-args \
+    -p laser_scan_topic:=/scan \
+    -p odom_topic:=/odom \
+    -p publish_tf:=true \
+    -p base_frame_id:=base_link \
+    -p odom_frame_id:=odom
 
-# 1. Jump inside your already active container
-docker exec -it my_robot_app bash
+Step 4 [Terminal 4]: Route into the container and boot the SLAM Graph generation solver:
+  docker exec -it my_robot_app bash
+  ros2 launch slam_toolbox online_async_launch.py
 
-# 2. Source the underlying ROS 2 Humble commands so the system understands them
-source /opt/ros/humble/setup.bash
+Step 5 [Mac Browser View]: Open your desktop browser and go to:
+  http://<YOUR_JETSON_IP>:8000
+  *Verify you can see the live black/white grid map updating.*
 
-# 3. Launch your LiDAR node. (Swap out 'rplidar_ros' with your specific hardware driver)
-ros2 launch rplidar_ros rplidar_node_launch.py
+Step 6 [Terminal 1 - Pinned Checkpoints]: Teleoperate/drive the robot. When it reaches 
+  your target desk area, go to Terminal 1, type '2', and input name: desk_area
+  (You can repeat this at other locations like kitchen, door, etc.)
 
+Step 7 [Terminal 1 - Save and Export]: Once mapping is complete, choose choice '3' 
+  in Terminal 1. Enter the prefix name: apartment
+  *This writes apartment_map.yaml, apartment_map.pgm, and apartment_checkpoints.json to your folder.*
 
+--------------------------------------------------------------------------------
+PHASE 4: TRANSITION AND AUTONOMOUS TESTING PROTOCOL
+--------------------------------------------------------------------------------
+To switch from mapping to point-to-point path planning while preserving collision layers:
 
-Terminal 3
+Step 1 [Terminal 4]: Press 'Ctrl + C' in Terminal 4 to stop the slam_toolbox mapper.
+  *DO NOT turn off Terminal 2 (LiDAR) or Terminal 3 (Laser Odometry).*
 
+Step 2 [Terminal 4]: In the now vacant Terminal 4, fire up the Nav2 navigation architecture:
+  ros2 launch nav2_bringup bringup_launch.py map:=/root/apartment_map.yaml use_sim_time:=false
 
-# 1. Jump inside the container
-docker exec -it my_robot_app bash
+Step 3 [Terminal 1]: Return to your interactive menu window in Terminal 1.
+  - Type '4' to execute 'test_mapping'.
+  - When prompted for the room layout: Type 'apartment'
+  - When prompted for the checkpoint destination: Type 'desk_area'
 
-# 2. Source the ROS 2 space
-source /opt/ros/humble/setup.bash
-
-# 3. Launch the official slam_toolbox node to start building your room map
-ros2 launch slam_toolbox online_async_launch.py
-
-Verify visual feedback: Go to your Mac desktop web browser and open http://192.168.1.50:8000
-
-
-
-Step 4: Track a Checkpoint DestinationDrive your robot around. Once it reaches a designated spot (e.g., near your desk):Go back to your Mac's Terminal 1 window (the Python interactive menu).Choose choice 2 (set_checkpoint).Type desk_area. The system reads the spatial transformation layout trees (/tf) and logs the position.Step 5: Save your Map FilesOnce the whole room looks clean and completely mapped on your browser stream:In Terminal 1, choose option 3 (save).Type your map file layout prefix: apartment.It automatically executes a map server script and exports apartment_map.yaml, apartment_map.pgm, and apartment_checkpoints.json to your Jetson's home directory.
-
-
+*Nav2 will immediately command the robot to travel to the target while using its live costmap layers to dynamically route around unexpected obstacles!*
+================================================================================
