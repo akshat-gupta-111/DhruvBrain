@@ -7,7 +7,8 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ENV DEBIAN_FRONTEND=noninteractive \
     ROS_DISTRO=humble \
     ROS_WS=/workspace/rf2o_ws \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    RMW_IMPLEMENTATION=rmw_fastrtps_cpp
 
 WORKDIR /workspace
 
