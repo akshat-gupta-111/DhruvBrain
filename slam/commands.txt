@@ -3,6 +3,27 @@
   Hardware: NVIDIA Jetson Orin Nano | RPLidar A1 | ROS 2 Humble
 ================================================================================
 
+================================================================================
+PHASE 0: UPDATING & REBUILDING THE DOCKER IMAGE
+================================================================================
+  If you edit code on your Mac (like robot_manager.py), you must rebuild the
+  container on the Jetson to make it permanent. Run these OUTSIDE the container:
+
+  # 1. Stop and delete the currently running container
+  sudo docker stop my_robot_app 2>/dev/null || true
+  sudo docker rm -f my_robot_app 2>/dev/null || true
+
+  # 2. Pull the newest code
+  cd ~/Desktop/DhruvBrain
+  git pull
+
+  # 3. Rebuild the image
+  sudo docker build -t dhruv-slam -f slam/dockerfile .
+
+================================================================================
+PHASE 1: STARTUP (Do this after a fresh rebuild, or just on boot)
+================================================================================
+
 SETUP: SSH into your Jetson from your Mac in 4 separate Terminal tabs.
   ssh dhruv@<YOUR_JETSON_IP>
 
