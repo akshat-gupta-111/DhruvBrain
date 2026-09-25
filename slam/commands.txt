@@ -81,9 +81,9 @@ TERMINAL 3 — RF2O Laser Odometry (converts /scan → /odom)
   # This links 'base_link' (robot center) to 'laser' (sensor)
   ros2 run tf2_ros static_transform_publisher 0 0 1.6 0 0 0 base_link laser &
 
-  # Second, link 'base_footprint' to 'base_link'. slam_toolbox defaults to 
+  # Second, link 'base_link' to 'base_footprint'. slam_toolbox defaults to 
   # base_footprint, so this prevents the "Failed to compute odom pose" error!
-  ros2 run tf2_ros static_transform_publisher 0 0 0 0 0 0 base_footprint base_link &
+  ros2 run tf2_ros static_transform_publisher 0 0 0 0 0 0 base_link base_footprint &
 
   # Launch RF2O using the official launch file instead of the raw node
   ros2 launch rf2o_laser_odometry rf2o_laser_odometry.launch.py \
