@@ -65,19 +65,17 @@ RUN set -eux; \
     rm -f /tmp/ros2-apt-source.deb
 
 # -------------------------------------------------
-# 4. Purge conflicting OpenCV packages & Install ROS navigation and SLAM
+# 4. Install ROS navigation and SLAM packages
 # -------------------------------------------------
-# The dustynv base image ships Jetson-optimised OpenCV. Generic Ubuntu
-# OpenCV packages (pulled in as slam-toolbox deps) collide with it.
-# We purge the generic ones first, then install only what we need.
+# The dustynv base image has Jetson-optimised OpenCV installed.
+# When slam-toolbox pulls in generic Ubuntu libopencv-dev, dpkg fails
+# because the Jetson OpenCV files already exist on disk.
+# Solution: pass --force-overwrite so dpkg replaces those files cleanly.
 
 RUN apt-get update && \
-    # Remove generic OpenCV that conflicts with Jetson OpenCV
-    apt-get remove -y --allow-change-held-packages \
-        'libopencv*' \
-        'python3-opencv' \
-        || true && \
-    apt-get install -y --no-install-recommends \
+    apt-get install -y \
+        -o Dpkg::Options::="--force-overwrite" \
+        --no-install-recommends \
         ros-humble-slam-toolbox \
         ros-humble-nav2-map-server \
         ros-humble-nav2-simple-commander \
@@ -157,3 +155,6 @@ CMD ["/bin/bash", "-c", \
      "source /opt/ros/humble/setup.bash && \
       source /workspace/rf2o_ws/install/setup.bash && \
       exec python3 /workspace/robot_manager.py"]
+
+
+
