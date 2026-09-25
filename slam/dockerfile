@@ -79,6 +79,11 @@ RUN apt-get update && \
         --no-install-recommends \
         ros-humble-ros2cli \
         ros-humble-ros2cli-common-extensions \
+        ros-humble-ros2topic \
+        ros-humble-ros2node \
+        ros-humble-ros2run \
+        ros-humble-ros2param \
+        ros-humble-ros2bag \
         ros-humble-slam-toolbox \
         ros-humble-nav2-map-server \
         ros-humble-nav2-simple-commander \
