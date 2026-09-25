@@ -77,8 +77,8 @@ RUN apt-get update && \
     apt-get install -y \
         -o Dpkg::Options::="--force-overwrite" \
         --no-install-recommends \
-        ros-humble-ros-base \
         ros-humble-ros2cli \
+        ros-humble-ros2cli-common-extensions \
         ros-humble-slam-toolbox \
         ros-humble-nav2-map-server \
         ros-humble-nav2-simple-commander \
