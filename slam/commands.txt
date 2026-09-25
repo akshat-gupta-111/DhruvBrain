@@ -99,8 +99,8 @@ TERMINAL 4 — SLAM Toolbox (builds the map)
   source /opt/ros/humble/setup.bash
   source /workspace/rf2o_ws/install/setup.bash
 
-  # Launch the SLAM mapper
-  ros2 launch slam_toolbox online_async_launch.py
+  # Launch the SLAM mapper (must use real time, not sim time)
+  ros2 launch slam_toolbox online_async_launch.py use_sim_time:=false
 
   → You should see: "CeresSolver: Using SCHUR_JACOBI preconditioner"
 
