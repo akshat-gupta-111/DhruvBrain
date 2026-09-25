@@ -27,9 +27,10 @@ PHASE 1: BUILD AND START THE CONTAINER (ONE TIME SETUP)
     --name=my_robot_app \
     --privileged \
     --net=host \
+    -e ROS_LOCALHOST_ONLY=1 \
     -v /dev:/dev \
     -v ~/:/root/ \
-    jetson_robot_manager
+    dhruv-slam
 
   → Terminal 1 will show the Python menu. Keep it here.
 
