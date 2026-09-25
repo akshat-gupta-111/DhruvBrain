@@ -31,26 +31,14 @@ PHASE 2: LIVE ROOM MAPPING OPERATIONS
 [Step 2] Boot up the LiDAR Sensor (Inside Docker Execution Context)
 - Open a brand new window or tab on your Mac (Terminal 2), SSH into your Jetson, and execute:
 
-    # 1. Jump inside your already active container
-    docker exec -it my_robot_app bash
-
-    # 2. Source the underlying ROS 2 Humble commands so the system understands them
-    source /opt/ros/humble/setup.bash
-
-    # 3. Launch your LiDAR node. (Swap out 'rplidar_ros' with your specific hardware driver)
-    ros2 launch rplidar_ros rplidar_node_launch.py
+    # 1. Jump inside your already active container (entrypoint sets up ROS env)
+    docker exec -it my_robot_app bash -c "source /opt/ros/humble/setup.bash && source /workspace/rf2o_ws/install/setup.bash && ros2 launch rplidar_ros rplidar_node_launch.py"
 
 [Step 3] Run the SLAM Mapper Graph
 - Open another new tab or window on your Mac (Terminal 3), SSH into your Jetson, and execute:
 
-    # 1. Jump inside the container
-    docker exec -it my_robot_app bash
-
-    # 2. Source the ROS 2 space
-    source /opt/ros/humble/setup.bash
-
-    # 3. Launch the official slam_toolbox node to start building your room map
-    ros2 launch slam_toolbox online_async_launch.py
+    # Run RF2O odometry (sources ROS env inline)
+    docker exec -it my_robot_app bash -c "source /opt/ros/humble/setup.bash && source /workspace/rf2o_ws/install/setup.bash && ros2 run rf2o_laser_odometry rf2o_laser_odometry_node --ros-args -p laser_scan_topic:=/scan -p odom_topic:=/odom -p publish_tf:=true -p base_frame_id:=base_link -p odom_frame_id:=odom"
 
 [Step 4] Verify Visual Feedback
 - Go to your Mac desktop web browser and navigate to:

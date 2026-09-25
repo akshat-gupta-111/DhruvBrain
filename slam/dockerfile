@@ -77,6 +77,8 @@ RUN apt-get update && \
     apt-get install -y \
         -o Dpkg::Options::="--force-overwrite" \
         --no-install-recommends \
+        ros-humble-ros-base \
+        ros-humble-ros2cli \
         ros-humble-slam-toolbox \
         ros-humble-nav2-map-server \
         ros-humble-nav2-simple-commander \
@@ -87,6 +89,9 @@ RUN apt-get update && \
         python3-colcon-common-extensions \
         libeigen3-dev \
     && rm -rf /var/lib/apt/lists/*
+
+# Remove the dustynv base image's broken .bashrc reference to /root/robot_ws
+RUN sed -i '/robot_ws/d' /root/.bashrc || true
 
 # -------------------------------------------------
 # 5. Python dependencies
