@@ -81,13 +81,17 @@ TERMINAL 3 — RF2O Laser Odometry (converts /scan → /odom)
   # This links 'base_link' (robot center) to 'laser' (sensor)
   ros2 run tf2_ros static_transform_publisher 0 0 1.6 0 0 0 base_link laser &
 
-  # Run the odometry node
-  ros2 run rf2o_laser_odometry rf2o_laser_odometry_node --ros-args \
-    -p laser_scan_topic:=/scan \
-    -p odom_topic:=/odom \
-    -p publish_tf:=true \
-    -p base_frame_id:=base_link \
-    -p odom_frame_id:=odom
+  # Second, link 'base_footprint' to 'base_link'. slam_toolbox defaults to 
+  # base_footprint, so this prevents the "Failed to compute odom pose" error!
+  ros2 run tf2_ros static_transform_publisher 0 0 0 0 0 0 base_footprint base_link &
+
+  # Launch RF2O using the official launch file instead of the raw node
+  ros2 launch rf2o_laser_odometry rf2o_laser_odometry.launch.py \
+    laser_scan_topic:=/scan \
+    odom_topic:=/odom \
+    publish_tf:=true \
+    base_frame_id:=base_link \
+    odom_frame_id:=odom
 
   → Wait for Terminal 2 (LiDAR) to be running first!
   → You should see scan data flowing instead of "Waiting for laser_scans"
@@ -200,3 +204,8 @@ STARTUP ORDER (CRITICAL — follow exactly):
   4. Terminal 1: Menu → type 1
   5. Browser: open http://<IP>:8000
 ================================================================================
+
+
+
+
+
