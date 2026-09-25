@@ -100,7 +100,7 @@ class RobotManagerNode(Node):
     def record_checkpoint(self, checkpoint_name):
         """Look up the transform from map coordinate origin to tracking base_link."""
         try:
-            now = rclpy.time.Time()
+            now = self.get_clock().now()
             trans = self.tf_buffer.lookup_transform('map', 'base_link', now, rclpy.duration.Duration(seconds=1.5))
             
             position = trans.transform.translation
@@ -123,7 +123,12 @@ class RobotManagerNode(Node):
     def save_map_and_metadata(self, room_name):
         print(f"Executing system map preservation for: {room_name}...")
         # Hardcoded to /root/ to perfectly sync with host mounts
-        os.system(f"ros2 run nav2_map_server map_saver_cli -f /root/{room_name}_map")
+        import subprocess
+        result = subprocess.run(
+            ["ros2", "run", "nav2_map_server", "map_saver_cli", "-f", f"/root/{room_name}_map"],
+            check=True
+        )
+        print(f"[SUCCESS] Map saved to /root/{room_name}_map")
         
         metadata_path = f"/root/{room_name}_checkpoints.json"
         with open(metadata_path, 'w') as f:
@@ -199,7 +204,9 @@ def interactive_menu():
                 while not navigator.isTaskComplete():
                     feedback = navigator.getFeedback()
                     if feedback:
-                        print(f"Moving... ETA: {feedback.estimated_time_remaining:.1f}s", end="\r")
+                        eta = feedback.estimated_time_remaining
+                        eta_sec = eta.sec + eta.nanosec * 1e-9
+                        print(f"Moving... ETA: {eta_sec:.1f}s", end="\r")
                     time.sleep(1.0)
                     
                 result = navigator.getResult()

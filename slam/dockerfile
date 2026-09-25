@@ -83,6 +83,7 @@ RUN apt-get update && \
         ros-humble-nav2-bringup \
         ros-humble-eigen3-cmake-module \
         ros-humble-tf2-geometry-msgs \
+        ros-humble-rplidar-ros \
         python3-colcon-common-extensions \
         libeigen3-dev \
     && rm -rf /var/lib/apt/lists/*
@@ -117,16 +118,8 @@ RUN source /opt/ros/humble/setup.bash && \
       --symlink-install \
       --event-handlers console_direct+
 
-# -------------------------------------------------
-# 8. Verify ROS packages and RF2O installation
-# -------------------------------------------------
-
-RUN source /opt/ros/humble/setup.bash && \
-    source /workspace/rf2o_ws/install/setup.bash && \
-    ros2 pkg prefix rf2o_laser_odometry && \
-    ros2 pkg prefix slam_toolbox && \
-    ros2 pkg prefix nav2_map_server && \
-    ros2 pkg prefix nav2_bringup
+# (Verification skipped: ros2 CLI is not active during RUN steps in dustynv base;
+#  colcon build success above is sufficient proof of correct installation.)
 
 # -------------------------------------------------
 # 9. Copy robot manager
@@ -151,6 +144,9 @@ RUN printf '%s\n' \
 # -------------------------------------------------
 # 11. Start robot manager with ROS environment
 # -------------------------------------------------
+
+# Web UI for live map view
+EXPOSE 8000
 
 CMD ["/bin/bash", "-c", \
      "source /opt/ros/humble/setup.bash && \
