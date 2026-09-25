@@ -124,9 +124,14 @@ class RobotManagerNode(Node):
         print(f"Executing system map preservation for: {room_name}...")
         # Hardcoded to /root/ to perfectly sync with host mounts
         import subprocess
+        # Explicitly inherit the environment (so ROS_LOCALHOST_ONLY is passed) and use transient_local QoS
+        env = os.environ.copy()
+        env['ROS_LOCALHOST_ONLY'] = '1'
         result = subprocess.run(
-            ["ros2", "run", "nav2_map_server", "map_saver_cli", "-f", f"/root/{room_name}_map"],
-            check=True
+            ["ros2", "run", "nav2_map_server", "map_saver_cli", "-f", f"/root/{room_name}_map", 
+             "--ros-args", "-p", "map_subscribe_transient_local:=true"],
+            check=True,
+            env=env
         )
         print(f"[SUCCESS] Map saved to /root/{room_name}_map")
         
