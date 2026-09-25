@@ -90,12 +90,12 @@ RUN apt-get update && \
         libeigen3-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Remove the dustynv base image's broken .bashrc reference to /root/robot_ws
-RUN sed -i '/robot_ws/d' /root/.bashrc || true
-
-# -------------------------------------------------
-# 5. Python dependencies
-# -------------------------------------------------
+# Clean up dustynv .bashrc artifact and auto-source ROS on every new shell
+RUN sed -i '/robot_ws/d' /root/.bashrc && \
+    printf '%s\n' \
+    'source /opt/ros/humble/setup.bash 2>/dev/null || true' \
+    'source /workspace/rf2o_ws/install/setup.bash 2>/dev/null || true' \
+    >> /root/.bashrc
 
 RUN python3 -m pip install \
       --no-cache-dir \
