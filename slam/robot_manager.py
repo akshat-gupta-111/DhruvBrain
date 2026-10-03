@@ -127,13 +127,21 @@ class RobotManagerNode(Node):
         # Explicitly inherit the environment (so ROS_LOCALHOST_ONLY is passed) and use transient_local QoS
         env = os.environ.copy()
         env['ROS_LOCALHOST_ONLY'] = '1'
-        result = subprocess.run(
-            ["ros2", "run", "nav2_map_server", "map_saver_cli", "-f", f"/root/{room_name}_map", 
-             "--ros-args", "-p", "map_subscribe_transient_local:=true"],
-            check=True,
-            env=env
-        )
-        print(f"[SUCCESS] Map saved to /root/{room_name}_map")
+        try:
+            result = subprocess.run(
+                ["ros2", "run", "nav2_map_server", "map_saver_cli", "-f", f"/root/{room_name}_map", 
+                 "--ros-args", "-p", "map_subscribe_transient_local:=true"],
+                check=True,
+                env=env,
+                timeout=10
+            )
+            print(f"[SUCCESS] Map saved to /root/{room_name}_map")
+        except subprocess.CalledProcessError as e:
+            print(f"\n[ERROR] Map saver failed to connect to ROS network (Exit Code {e.returncode}).")
+            print("Please run the save command manually in Terminal 5 instead!")
+        except subprocess.TimeoutExpired:
+            print(f"\n[ERROR] Map saver timed out waiting for the /map topic.")
+            print("Please run the save command manually in Terminal 5 instead!")
         
         metadata_path = f"/root/{room_name}_checkpoints.json"
         with open(metadata_path, 'w') as f:
