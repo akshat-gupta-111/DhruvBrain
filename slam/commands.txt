@@ -43,7 +43,7 @@ PHASE 1: BUILD AND START THE CONTAINER (ONE TIME SETUP)
   # 3. Remove any old container if it exists
   sudo docker rm -f my_robot_app 2>/dev/null || true
 
-  # 4. Start the interactive container
+  # 4. Start the interactive container (adding 'bash' at the end stops it from auto-running the old script)
   sudo docker run -it \
     --name=my_robot_app \
     --privileged \
@@ -51,7 +51,13 @@ PHASE 1: BUILD AND START THE CONTAINER (ONE TIME SETUP)
     -e ROS_LOCALHOST_ONLY=1 \
     -v /dev:/dev \
     -v ~/:/root/ \
-    dhruv-slam
+    dhruv-slam \
+    bash
+
+  # 5. Start the live Robot Manager (from your shared folder, so it auto-updates!)
+  source /opt/ros/humble/setup.bash
+  source /workspace/rf2o_ws/install/setup.bash
+  python3 /root/Desktop/DhruvBrain/slam/robot_manager.py
 
   → Terminal 1 will show the Python menu. Keep it here.
 
