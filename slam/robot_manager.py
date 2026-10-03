@@ -6,7 +6,7 @@ import time
 import threading
 from io import BytesIO
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from PIL import Image
+from PIL import Image, ImageDraw
 
 import rclpy
 from rclpy.node import Node
@@ -90,6 +90,32 @@ class RobotManagerNode(Node):
                     pixels[x, height - 1 - y] = (0, 0, 0)       # Wall
                 else:
                     pixels[x, height - 1 - y] = (127, 127, 127) # Unknown
+
+        # Prepare to draw on the image
+        draw = ImageDraw.Draw(img)
+        resolution = msg.info.resolution
+        origin_x = msg.info.origin.position.x
+        origin_y = msg.info.origin.position.y
+
+        # Draw Checkpoints (Red Dots)
+        for name, pt in self.checkpoints.items():
+            px = (pt['x'] - origin_x) / resolution
+            py = height - 1 - ((pt['y'] - origin_y) / resolution)
+            r = 3
+            draw.ellipse((px - r, py - r, px + r, py + r), fill=(255, 0, 0))
+
+        # Draw Robot Position (Blue Dot)
+        try:
+            # Look up current robot position on the map
+            trans = self.tf_buffer.lookup_transform('map', 'base_link', rclpy.time.Time())
+            rx = trans.transform.translation.x
+            ry = trans.transform.translation.y
+            px = (rx - origin_x) / resolution
+            py = height - 1 - ((ry - origin_y) / resolution)
+            r = 5
+            draw.ellipse((px - r, py - r, px + r, py + r), fill=(0, 100, 255))
+        except Exception:
+            pass # If TF isn't ready yet, just skip drawing the robot dot
 
         # Buffer output stream
         buf = BytesIO()
