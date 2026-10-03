@@ -114,8 +114,10 @@ class RobotManagerNode(Node):
             py = height - 1 - ((ry - origin_y) / resolution)
             r = 5
             draw.ellipse((px - r, py - r, px + r, py + r), fill=(0, 100, 255))
-        except Exception:
-            pass # If TF isn't ready yet, just skip drawing the robot dot
+        except Exception as e:
+            if not hasattr(self, 'tf_error_printed'):
+                print(f"[WARNING] Cannot draw blue dot. TF Error: {e}")
+                self.tf_error_printed = True
 
         # Buffer output stream
         buf = BytesIO()
