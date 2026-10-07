@@ -1,0 +1,75 @@
+# =============================================================================
+#  DHRUV SLAM — docker-compose.yml
+#
+#  ONE command to run the full SLAM stack:
+#    sudo docker compose up
+#
+#  The single 'slam' container runs all 4 ROS nodes in the correct order:
+#    1. Static TF publishers  (base_link → laser, base_link → base_footprint)
+#    2. RPLidar A1 node       (publishes /scan)
+#    3. RF2O laser odometry   (/scan → /odom)
+#    4. SLAM Toolbox          (/scan + /odom → /map)
+#    5. Robot Manager         (interactive menu + web viewer on port 8000)
+#
+#  Interactive menu (set checkpoints, save map, navigate):
+#    sudo docker attach dhruv-slam
+#    (Detach without stopping: Ctrl-P, Ctrl-Q)
+#
+#  Live map browser:
+#    http://<JETSON_IP>:8000
+# =============================================================================
+
+services:
+  slam:
+    build:
+      context: .          # slam/ directory is the build context
+      dockerfile: dockerfile
+    image: dhruv-slam
+
+    container_name: dhruv-slam
+
+    # Keep the container running even after reboots
+    restart: unless-stopped
+
+    # --- Entrypoint ------------------------------------------------------
+    # The entrypoint.sh script starts all ROS nodes in the right order and
+    # then launches the interactive robot_manager in the foreground.
+    entrypoint: ["/bin/bash", "/workspace/entrypoint.sh"]
+
+    # --- Networking ------------------------------------------------------
+    # host mode: all ROS DDS traffic stays on the Jetson loopback interface,
+    # matching the old `--net=host -e ROS_LOCALHOST_ONLY=1` run flags.
+    network_mode: host
+
+    environment:
+      - ROS_LOCALHOST_ONLY=1
+      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+      - PYTHONUNBUFFERED=1      # see robot_manager output in real time
+
+    # --- Hardware access -------------------------------------------------
+    # privileged gives access to /dev/ttyUSB0 (RPLidar) and any other USB
+    privileged: true
+
+    # Map the whole /dev tree so the LiDAR port is always visible,
+    # no matter which ttyUSB* the kernel assigns it.
+    volumes:
+      - /dev:/dev
+
+      # Mount the Jetson home folder as /root/ so saved maps land on the
+      # host at ~/apartment_map.yaml (same as the old docker run command).
+      - ~/:/root/
+
+      # Hot-reload: mount the slam/ source directory so edits to
+      # robot_manager.py on the host are picked up without a rebuild.
+      - ./:/workspace/src_live/
+
+    # --- Port ------------------------------------------------------------
+    # port 8000 is already exposed via network_mode: host, but this line
+    # is kept for documentation clarity.
+    expose:
+      - "8000"
+
+    # --- stdin / tty -----------------------------------------------------
+    # Required so `docker attach dhruv-slam` shows the interactive menu.
+    stdin_open: true
+    tty: true

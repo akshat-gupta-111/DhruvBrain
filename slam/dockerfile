@@ -137,9 +137,11 @@ RUN source /opt/ros/humble/setup.bash && \
 
 WORKDIR /workspace
 
+# Copy application scripts
 COPY robot_manager.py /workspace/robot_manager.py
+COPY entrypoint.sh   /workspace/entrypoint.sh
 
-RUN chmod +x /workspace/robot_manager.py && \
+RUN chmod +x /workspace/robot_manager.py /workspace/entrypoint.sh && \
     python3 -m py_compile /workspace/robot_manager.py
 
 # -------------------------------------------------
@@ -152,16 +154,16 @@ RUN printf '%s\n' \
     >> /root/.bashrc
 
 # -------------------------------------------------
-# 11. Start robot manager with ROS environment
+# 11. Unified entrypoint — starts ALL ROS nodes then
+#     launches the interactive robot_manager menu.
+#     Used by both `docker compose up` and the old
+#     `docker run` workflow.
 # -------------------------------------------------
 
 # Web UI for live map view
 EXPOSE 8000
 
-CMD ["/bin/bash", "-c", \
-     "source /opt/ros/humble/setup.bash && \
-      source /workspace/rf2o_ws/install/setup.bash && \
-      exec python3 /workspace/robot_manager.py"]
+CMD ["/bin/bash", "/workspace/entrypoint.sh"]
 
 
 

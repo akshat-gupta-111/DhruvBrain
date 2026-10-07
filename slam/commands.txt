@@ -1,5 +1,47 @@
 ================================================================================
-  DHRUV SLAM — COMPLETE TERMINAL-BY-TERMINAL OPERATION GUIDE
+  DHRUV SLAM — SIMPLIFIED DOCKER COMPOSE WORKFLOW  (NEW — USE THIS)
+  Hardware: NVIDIA Jetson Orin Nano | RPLidar A1 | ROS 2 Humble
+================================================================================
+
+  Everything that used to require 4 separate terminals now runs with a SINGLE
+  command. The entrypoint.sh inside the container starts all ROS 2 nodes in
+  the correct dependency order automatically.
+
+  ── FIRST TIME (build the image) ─────────────────────────────────────────────
+
+    cd ~/Desktop/DhruvBrain/slam
+    sudo docker compose build
+
+  ── DAILY USE ────────────────────────────────────────────────────────────────
+
+    # Start the full SLAM stack (runs in the background)
+    sudo docker compose up -d
+
+    # Attach to the interactive menu (set checkpoints, save map, navigate)
+    sudo docker attach dhruv-slam
+
+    # Detach WITHOUT stopping the container: press  Ctrl-P  then  Ctrl-Q
+
+  ── STOP ─────────────────────────────────────────────────────────────────────
+
+    sudo docker compose down
+
+  ── LIVE MAP BROWSER ─────────────────────────────────────────────────────────
+
+    http://<YOUR_JETSON_IP>:8000     (auto-refreshes every 2 seconds)
+
+  ── REBUILD AFTER CODE CHANGES ───────────────────────────────────────────────
+
+    git pull
+    sudo docker compose build
+    sudo docker compose up -d
+
+  NOTE: robot_manager.py is volume-mounted from the host (./robot_manager.py),
+        so edits to that file are picked up WITHOUT a rebuild — just restart:
+        sudo docker compose restart
+
+================================================================================
+  DHRUV SLAM — LEGACY TERMINAL-BY-TERMINAL GUIDE  (kept for reference)
   Hardware: NVIDIA Jetson Orin Nano | RPLidar A1 | ROS 2 Humble
 ================================================================================
 
