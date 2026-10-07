@@ -257,8 +257,17 @@ def interactive_menu():
         choice = input("Select an option (1-5): ").strip()
         
         if choice == '1':
-            print("\n[START MAPPING] Ready. Please run your LiDAR and slam_toolbox nodes in extra terminals.")
-            
+            with map_lock:
+                count = map_received_count
+            print("\n[MAPPING] All SLAM nodes are already running in the background.")
+            print(f"          /map frames received so far: {count}")
+            if count == 0:
+                print("          Map not received yet — drive the robot to start building it.")
+                print("          Live view: http://localhost:8000")
+            else:
+                print(f"          Mapping is active. Live view: http://localhost:8000")
+
+
         elif choice == '2':
             name = input("Enter checkpoint name (e.g., desk_area): ").strip()
             if name:
