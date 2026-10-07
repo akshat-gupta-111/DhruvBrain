@@ -118,4 +118,8 @@ echo "============================================================"
 echo ""
 
 # exec replaces the shell with Python so signals are forwarded correctly
-exec python3 /workspace/robot_manager.py
+if [ -f /workspace/src_live/robot_manager.py ]; then
+    exec python3 /workspace/src_live/robot_manager.py
+else
+    exec python3 /workspace/robot_manager.py
+fi

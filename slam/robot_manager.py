@@ -5,6 +5,7 @@ import json
 import time
 import threading
 from io import BytesIO
+import yaml
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from PIL import Image, ImageDraw, ImageFont
 
@@ -93,12 +94,13 @@ class MapWebServer(BaseHTTPRequestHandler):
                     btn_pgm  = f'<a class="btn" href="/download?file={map_name}_map.pgm">&#11123; .pgm</a>'  if files.get('pgm')  else '<span class="btn disabled">.pgm</span>'
                     btn_yaml = f'<a class="btn" href="/download?file={map_name}_map.yaml">&#11123; .yaml</a>' if files.get('yaml') else '<span class="btn disabled">.yaml</span>'
                     btn_json = f'<a class="btn" href="/download?file={map_name}_checkpoints.json">&#11123; .json</a>' if files.get('json') else '<span class="btn disabled">.json</span>'
-                    dl_rows += f'<tr><td class="mapname">{map_name}</td><td>{btn_pgm}</td><td>{btn_yaml}</td><td>{btn_json}</td></tr>'
+                    btn_anno = f'<a class="btn" href="/annotated.png?map={map_name}">&#128444; Annotated .png</a>' if files.get('pgm') and files.get('yaml') and files.get('json') else '<span class="btn disabled">Annotated .png</span>'
+                    dl_rows += f'<tr><td class="mapname">{map_name}</td><td>{btn_pgm}</td><td>{btn_yaml}</td><td>{btn_json}</td><td>{btn_anno}</td></tr>'
                 downloads_html = f"""
   <div class="card">
     <h2>&#128190; Saved Maps</h2>
     <table>
-      <thead><tr><th>Map Name</th><th>Grid (.pgm)</th><th>Metadata (.yaml)</th><th>Checkpoints (.json)</th></tr></thead>
+      <thead><tr><th>Map Name</th><th>Grid (.pgm)</th><th>Metadata (.yaml)</th><th>Checkpoints (.json)</th><th>Visual (.png)</th></tr></thead>
       <tbody>{dl_rows}</tbody>
     </table>
   </div>"""
@@ -209,6 +211,65 @@ class MapWebServer(BaseHTTPRequestHandler):
             self.send_header('Content-Length', str(len(img_data)))
             self.end_headers()
             self.wfile.write(img_data)
+
+        # ── /annotated.png?map=<name> ── render annotated map ─────────────────
+        elif self.path.startswith('/annotated.png?map='):
+            map_name = self.path[len('/annotated.png?map='):]
+            map_name = os.path.basename(map_name)  # Security
+            
+            pgm_path = os.path.join(SAVE_DIR, f"{map_name}_map.pgm")
+            yaml_path = os.path.join(SAVE_DIR, f"{map_name}_map.yaml")
+            json_path = os.path.join(SAVE_DIR, f"{map_name}_checkpoints.json")
+            
+            if not all(os.path.exists(p) for p in [pgm_path, yaml_path, json_path]):
+                self._send(404, 'text/plain', b'Missing map files (pgm, yaml, or json)')
+                return
+                
+            try:
+                # 1. Load YAML to get resolution and origin
+                with open(yaml_path, 'r') as f:
+                    map_meta = yaml.safe_load(f)
+                
+                resolution = map_meta['resolution']
+                origin_x = map_meta['origin'][0]
+                origin_y = map_meta['origin'][1]
+                
+                # 2. Load the PGM Image
+                img = Image.open(pgm_path).convert("RGBA")
+                draw = ImageDraw.Draw(img)
+                width, height = img.size
+                
+                # Try to load a default font
+                font = ImageFont.load_default()
+                
+                # 3. Load the Checkpoints
+                with open(json_path, 'r') as f:
+                    checkpoints = json.load(f)
+                    
+                # 4. Draw each checkpoint
+                for name, coords in checkpoints.items():
+                    world_x = coords['x']
+                    world_y = coords['y']
+                    
+                    px = (world_x - origin_x) / resolution
+                    py = height - ((world_y - origin_y) / resolution)
+                    
+                    r = 5
+                    draw.ellipse((px - r, py - r, px + r, py + r), fill="red", outline="black")
+                    draw.text((px + 10, py - 10), name, fill="red", font=font)
+                    
+                buf = BytesIO()
+                img.save(buf, format='PNG')
+                img_data = buf.getvalue()
+                
+                self.send_response(200)
+                self.send_header('Content-Type', 'image/png')
+                self.send_header('Content-Disposition', f'attachment; filename="{map_name}_annotated.png"')
+                self.send_header('Content-Length', str(len(img_data)))
+                self.end_headers()
+                self.wfile.write(img_data)
+            except Exception as e:
+                self._send(500, 'text/plain', f'Error generating image: {e}'.encode())
 
         else:
             self._send(404, 'text/plain', b'Not found')
@@ -325,12 +386,13 @@ class RobotManagerNode(Node):
         env = os.environ.copy()
         env['ROS_LOCALHOST_ONLY'] = '1'
         try:
+            # Added use_sim_time:=false and increased timeout to 30s to fix "failed to spin map subscription"
             result = subprocess.run(
                 ["ros2", "run", "nav2_map_server", "map_saver_cli", "-f", f"/root/{room_name}_map", 
-                 "--ros-args", "-p", "map_subscribe_transient_local:=true"],
+                 "--ros-args", "-p", "map_subscribe_transient_local:=true", "-p", "use_sim_time:=false"],
                 check=True,
                 env=env,
-                timeout=10
+                timeout=30
             )
             print(f"[SUCCESS] Map saved to /root/{room_name}_map")
         except subprocess.CalledProcessError as e:
