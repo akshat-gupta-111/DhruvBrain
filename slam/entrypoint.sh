@@ -23,12 +23,12 @@ echo ""
 # -----------------------------------------------------------------------------
 # Link 'base_link' → 'laser'  (LiDAR mounted 1.6 m above robot centre)
 echo "[TF] Publishing base_link → laser (height: 1.6 m)"
-ros2 run tf2_ros static_transform_publisher 0 0 1.6 0 0 0 base_link laser &
+ros2 run tf2_ros static_transform_publisher 0 0 1.6 0 0 0 base_link laser >/dev/null 2>&1 &
 TF_LASER_PID=$!
 
 # Link 'base_link' → 'base_footprint'  (prevents "Failed to compute odom pose")
 echo "[TF] Publishing base_link → base_footprint"
-ros2 run tf2_ros static_transform_publisher 0 0 0 0 0 0 base_link base_footprint &
+ros2 run tf2_ros static_transform_publisher 0 0 0 0 0 0 base_link base_footprint >/dev/null 2>&1 &
 TF_FOOTPRINT_PID=$!
 
 sleep 1
@@ -37,7 +37,7 @@ sleep 1
 # STEP 2: RPLidar A1 Node  (must be first — everyone subscribes to /scan)
 # -----------------------------------------------------------------------------
 echo "[LIDAR] Starting RPLidar A1 node..."
-ros2 launch rplidar_ros rplidar_a1_launch.py &
+ros2 launch rplidar_ros rplidar_a1_launch.py >/dev/null 2>&1 &
 LIDAR_PID=$!
 
 # Wait until /scan is actively publishing before moving on
@@ -66,7 +66,7 @@ ros2 launch rf2o_laser_odometry rf2o_laser_odometry.launch.py \
     odom_topic:=/odom \
     publish_tf:=true \
     base_frame_id:=base_link \
-    odom_frame_id:=odom &
+    odom_frame_id:=odom >/dev/null 2>&1 &
 RF2O_PID=$!
 
 # Wait until /odom is publishing before starting SLAM
@@ -88,7 +88,7 @@ sleep 1
 # STEP 4: SLAM Toolbox  (needs /scan + /odom)
 # -----------------------------------------------------------------------------
 echo "[SLAM] Starting slam_toolbox (online async mode)..."
-ros2 launch slam_toolbox online_async_launch.py use_sim_time:=false &
+ros2 launch slam_toolbox online_async_launch.py use_sim_time:=false >/dev/null 2>&1 &
 SLAM_PID=$!
 
 # Wait until /map starts publishing
