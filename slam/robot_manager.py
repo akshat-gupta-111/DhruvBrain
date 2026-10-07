@@ -38,6 +38,37 @@ def _make_placeholder_png(width: int = 480, height: int = 240) -> bytes:
 
 PLACEHOLDER_PNG = _make_placeholder_png()
 
+
+# MIME types for downloadable files
+_MIME = {
+    '.pgm':  'image/x-portable-graymap',
+    '.yaml': 'text/yaml',
+    '.json': 'application/json',
+    '.png':  'image/png',
+}
+
+SAVE_DIR = '/root'   # where robot_manager saves map files
+
+
+def _list_saved_maps():
+    """
+    Scan SAVE_DIR for saved map sets and return a dict:
+      { 'apartment': {'pgm': True, 'yaml': True, 'json': True}, ... }
+    """
+    sets = {}
+    try:
+        for fname in os.listdir(SAVE_DIR):
+            if fname.endswith('_map.pgm'):
+                name = fname[:-len('_map.pgm')]
+                if name not in sets:
+                    sets[name] = {}
+                sets[name]['pgm']  = os.path.isfile(os.path.join(SAVE_DIR, f'{name}_map.pgm'))
+                sets[name]['yaml'] = os.path.isfile(os.path.join(SAVE_DIR, f'{name}_map.yaml'))
+                sets[name]['json'] = os.path.isfile(os.path.join(SAVE_DIR, f'{name}_checkpoints.json'))
+    except Exception:
+        pass
+    return sets
+
 class MapWebServer(BaseHTTPRequestHandler):
     """Serve the live map page and PNG on port 8000."""
 
@@ -54,32 +85,74 @@ class MapWebServer(BaseHTTPRequestHandler):
                 has_map = bool(latest_map_img_bytes)
                 count   = map_received_count
 
-            if has_map:
-                status_html = f'<p style="color:#4caf50;">&#10004; Live map active &mdash; {count} frames received</p>'
+            # Build the downloads section
+            saved = _list_saved_maps()
+            if saved:
+                dl_rows = ''
+                for map_name, files in sorted(saved.items()):
+                    btn_pgm  = f'<a class="btn" href="/download?file={map_name}_map.pgm">&#11123; .pgm</a>'  if files.get('pgm')  else '<span class="btn disabled">.pgm</span>'
+                    btn_yaml = f'<a class="btn" href="/download?file={map_name}_map.yaml">&#11123; .yaml</a>' if files.get('yaml') else '<span class="btn disabled">.yaml</span>'
+                    btn_json = f'<a class="btn" href="/download?file={map_name}_checkpoints.json">&#11123; .json</a>' if files.get('json') else '<span class="btn disabled">.json</span>'
+                    dl_rows += f'<tr><td class="mapname">{map_name}</td><td>{btn_pgm}</td><td>{btn_yaml}</td><td>{btn_json}</td></tr>'
+                downloads_html = f"""
+  <div class="card">
+    <h2>&#128190; Saved Maps</h2>
+    <table>
+      <thead><tr><th>Map Name</th><th>Grid (.pgm)</th><th>Metadata (.yaml)</th><th>Checkpoints (.json)</th></tr></thead>
+      <tbody>{dl_rows}</tbody>
+    </table>
+  </div>"""
             else:
-                status_html = '<p style="color:#ff9800;">&#9899; Waiting for /map data &mdash; drive the robot to start mapping</p>'
+                downloads_html = '<div class="card"><p style="color:#888">No saved maps yet. Use option 3 (save) in the terminal menu.</p></div>'
+
+            with map_lock:
+                snap_available = bool(latest_map_img_bytes)
+            snap_btn = '<a class="btn" href="/snapshot.png">&#11123; Download live map (.png)</a>' if snap_available else '<span class="btn disabled">Live PNG (no map yet)</span>'
 
             html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta http-equiv="refresh" content="2">
+  <meta http-equiv="refresh" content="3">
   <title>DHRUV SLAM &mdash; Live Map</title>
   <style>
-    body {{ background:#1a1a2e; color:#eee; text-align:center;
-            font-family:'Segoe UI',sans-serif; margin:0; padding:20px; }}
-    h1   {{ color:#00b4d8; margin-bottom:4px; }}
-    img  {{ border:2px solid #444; border-radius:6px;
-            max-width:95%; max-height:78vh; margin-top:12px; }}
-    a    {{ color:#90e0ef; text-decoration:none; }}
+    * {{ box-sizing:border-box; margin:0; padding:0; }}
+    body {{ background:#0f0f1a; color:#e0e0e0;
+            font-family:'Segoe UI',system-ui,sans-serif; padding:24px; }}
+    h1   {{ color:#00b4d8; font-size:1.6rem; margin-bottom:4px; text-align:center; }}
+    .sub {{ text-align:center; color:#666; font-size:.85rem; margin-bottom:20px; }}
+    .status-ok  {{ color:#4caf50; text-align:center; margin:8px 0; }}
+    .status-wait{{ color:#ff9800; text-align:center; margin:8px 0; }}
+    .mapwrap {{ text-align:center; margin-bottom:24px; }}
+    .mapwrap img {{ border:2px solid #2a2a4a; border-radius:8px;
+                    max-width:100%; max-height:70vh; }}
+    .card {{ background:#16213e; border:1px solid #2a2a4a; border-radius:10px;
+             padding:20px; margin-bottom:20px; }}
+    .card h2 {{ color:#90e0ef; font-size:1.1rem; margin-bottom:14px; }}
+    table  {{ width:100%; border-collapse:collapse; font-size:.9rem; }}
+    th     {{ color:#90e0ef; border-bottom:1px solid #2a2a4a;
+             padding:8px 12px; text-align:left; }}
+    td     {{ padding:8px 12px; border-bottom:1px solid #1a1a30; }}
+    td.mapname {{ font-weight:600; color:#cce; }}
+    .btn {{ display:inline-block; padding:5px 14px; border-radius:6px;
+            background:#0077b6; color:#fff; text-decoration:none;
+            font-size:.82rem; margin:2px; transition:background .2s; }}
+    .btn:hover {{ background:#0096c7; }}
+    .btn.disabled {{ background:#2a2a4a; color:#555; cursor:default; }}
+    .snap {{ text-align:center; margin-top:4px; }}
   </style>
 </head>
 <body>
   <h1>DHRUV SLAM &mdash; Live Map</h1>
-  {status_html}
-  <div><img src="/map.png" alt="SLAM map"></div>
-  <p style="font-size:0.8em;color:#777;">Auto-refreshing every 2 s &nbsp;|&nbsp;
-     <a href="/status">/status (diagnostics)</a></p>
+  <p class="sub">Auto-refreshing every 3 s &nbsp;|&nbsp; <a href="/status" style="color:#90e0ef">diagnostics</a></p>
+  <p class="{'status-ok' if has_map else 'status-wait'}">
+    {'&#10004; Live &mdash; ' + str(count) + ' frames received' if has_map else '&#9899; Waiting for /map &mdash; drive the robot to start mapping'}
+  </p>
+
+  <div class="mapwrap"><img src="/map.png" alt="SLAM map"></div>
+  <div class="snap">{snap_btn}</div>
+
+  {downloads_html}
 </body>
 </html>"""
             self._send(200, 'text/html; charset=utf-8', html.encode())
@@ -100,6 +173,42 @@ class MapWebServer(BaseHTTPRequestHandler):
                 'map_live': count > 0,
             }, indent=2)
             self._send(200, 'application/json', payload.encode())
+
+        # ── /download?file=<name> ── serve a saved map file ───────────────────
+        elif self.path.startswith('/download?file='):
+            filename = self.path[len('/download?file='):]
+            # Security: only allow basenames with known extensions, no path traversal
+            basename = os.path.basename(filename)
+            ext = os.path.splitext(basename)[1].lower()
+            if ext not in _MIME or '..' in filename:
+                self._send(400, 'text/plain', b'Invalid file')
+                return
+            filepath = os.path.join(SAVE_DIR, basename)
+            if not os.path.isfile(filepath):
+                self._send(404, 'text/plain', b'File not found')
+                return
+            with open(filepath, 'rb') as f:
+                data = f.read()
+            self.send_response(200)
+            self.send_header('Content-Type', _MIME[ext])
+            self.send_header('Content-Disposition', f'attachment; filename="{basename}"')
+            self.send_header('Content-Length', str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        # ── /snapshot.png ── download the current live map as PNG ─────────────
+        elif self.path == '/snapshot.png':
+            with map_lock:
+                img_data = latest_map_img_bytes
+            if not img_data:
+                self._send(404, 'text/plain', b'No map data yet')
+                return
+            self.send_response(200)
+            self.send_header('Content-Type', 'image/png')
+            self.send_header('Content-Disposition', 'attachment; filename="live_map_snapshot.png"')
+            self.send_header('Content-Length', str(len(img_data)))
+            self.end_headers()
+            self.wfile.write(img_data)
 
         else:
             self._send(404, 'text/plain', b'Not found')
