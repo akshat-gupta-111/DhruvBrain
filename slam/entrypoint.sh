@@ -83,7 +83,7 @@ ros2 launch rf2o_laser_odometry rf2o_laser_odometry.launch.py \
     odom_topic:=/odom \
     publish_tf:=true \
     base_frame_id:=base_link \
-    odom_frame_id:=odom >/dev/null 2>&1 &
+    odom_frame_id:=odom >/tmp/rf2o.log 2>&1 &
 RF2O_PID=$!
 
 # RF2O needs a few seconds to read scan data and start publishing odom.
@@ -95,7 +95,7 @@ sleep 8
 # STEP 4 — SLAM Toolbox  (needs /scan + /odom)
 # -----------------------------------------------------------------------------
 echo "[4/4] Starting SLAM Toolbox (online async)..."
-ros2 launch slam_toolbox online_async_launch.py use_sim_time:=false >/dev/null 2>&1 &
+ros2 launch slam_toolbox online_async_launch.py use_sim_time:=false >/tmp/slam.log 2>&1 &
 SLAM_PID=$!
 
 # SLAM toolbox takes ~5-10 s to initialise Ceres solver
@@ -109,6 +109,11 @@ echo ""
 echo "============================================================"
 echo "  All SLAM nodes launched."
 echo "  Live map browser: http://<JETSON_IP>:8000"
+echo "  Diagnostics:      http://<JETSON_IP>:8000/status"
+echo ""
+echo "  If /map never appears, check logs:"
+echo "    RF2O log:  tail -f /tmp/rf2o.log"
+echo "    SLAM log:  tail -f /tmp/slam.log"
 echo "============================================================"
 echo ""
 

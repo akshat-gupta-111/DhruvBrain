@@ -6,7 +6,7 @@ import time
 import threading
 from io import BytesIO
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 
 import rclpy
 from rclpy.node import Node
@@ -15,43 +15,102 @@ from geometry_msgs.msg import PoseStamped
 from tf2_ros import Buffer, TransformListener
 from nav2_simple_commander.robot_navigator import BasicNavigator, TaskResult
 
-# Global memory to share map graphics with the port 8000 Web Server
-latest_map_img_bytes = b""
+# Global memory shared between the ROS node and the web server
+latest_map_img_bytes = b""   # empty = no map received yet
 map_lock = threading.Lock()
+map_received_count = 0        # how many /map messages we have processed
+scan_received = False         # set True on first /scan echo (via map arrival)
+
+
+def _make_placeholder_png(width: int = 480, height: int = 240) -> bytes:
+    """Generate a grey 'Waiting for map...' placeholder image."""
+    img = Image.new('RGB', (width, height), color=(40, 40, 40))
+    draw = ImageDraw.Draw(img)
+    msg = "Waiting for /map data..."
+    sub = "Drive the robot to start SLAM mapping."
+    # Draw centred text (no truetype needed)
+    draw.text((width // 2, height // 2 - 20), msg, fill=(180, 180, 180), anchor='mm')
+    draw.text((width // 2, height // 2 + 10), sub, fill=(120, 120, 120), anchor='mm')
+    buf = BytesIO()
+    img.save(buf, format='PNG')
+    return buf.getvalue()
+
+
+PLACEHOLDER_PNG = _make_placeholder_png()
 
 class MapWebServer(BaseHTTPRequestHandler):
-    """Serve a basic HTML page and stream live map updates over port 8000."""
+    """Serve the live map page and PNG on port 8000."""
+
+    # Silence the per-request log lines so they don't flood the terminal
+    def log_message(self, format, *args):
+        pass
+
     def do_GET(self):
-        global latest_map_img_bytes
+        global latest_map_img_bytes, map_received_count
+
+        # ── / ── main page ────────────────────────────────────────────────────
         if self.path == '/':
-            self.send_response(200)
-            self.send_header("Content-type", "text/html")
-            self.end_headers()
-            html = """
-            <html>
-            <head><title>ROS 2 Live Map Stream</title><meta http-equiv="refresh" content="2"></head>
-            <body style="background:#222; color:#fff; text-align:center; font-family:sans-serif;">
-                <h2>Live Map Simulation Viewer</h2>
-                <div><img src="/map.png" style="border:2px solid #555; max-width:90%; max-height:80vh;" /></div>
-                <p>Auto-refreshing every 2 seconds...</p>
-            </body>
-            </html>
-            """
-            self.wfile.write(html.encode('utf-8'))
+            with map_lock:
+                has_map = bool(latest_map_img_bytes)
+                count   = map_received_count
+
+            if has_map:
+                status_html = f'<p style="color:#4caf50;">&#10004; Live map active &mdash; {count} frames received</p>'
+            else:
+                status_html = '<p style="color:#ff9800;">&#9899; Waiting for /map data &mdash; drive the robot to start mapping</p>'
+
+            html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="refresh" content="2">
+  <title>DHRUV SLAM &mdash; Live Map</title>
+  <style>
+    body {{ background:#1a1a2e; color:#eee; text-align:center;
+            font-family:'Segoe UI',sans-serif; margin:0; padding:20px; }}
+    h1   {{ color:#00b4d8; margin-bottom:4px; }}
+    img  {{ border:2px solid #444; border-radius:6px;
+            max-width:95%; max-height:78vh; margin-top:12px; }}
+    a    {{ color:#90e0ef; text-decoration:none; }}
+  </style>
+</head>
+<body>
+  <h1>DHRUV SLAM &mdash; Live Map</h1>
+  {status_html}
+  <div><img src="/map.png" alt="SLAM map"></div>
+  <p style="font-size:0.8em;color:#777;">Auto-refreshing every 2 s &nbsp;|&nbsp;
+     <a href="/status">/status (diagnostics)</a></p>
+</body>
+</html>"""
+            self._send(200, 'text/html; charset=utf-8', html.encode())
+
+        # ── /map.png ── actual map image (or placeholder) ─────────────────────
         elif self.path == '/map.png':
             with map_lock:
                 img_data = latest_map_img_bytes
-            if img_data:
-                self.send_response(200)
-                self.send_header("Content-type", "image/png")
-                self.end_headers()
-                self.wfile.write(img_data)
-            else:
-                self.send_response(404)
-                self.end_headers()
+            # Always return 200 with either the real map or the placeholder
+            self._send(200, 'image/png', img_data if img_data else PLACEHOLDER_PNG)
+
+        # ── /status ── quick JSON diagnostic ──────────────────────────────────
+        elif self.path == '/status':
+            with map_lock:
+                count = map_received_count
+            payload = json.dumps({
+                'map_frames_received': count,
+                'map_live': count > 0,
+            }, indent=2)
+            self._send(200, 'application/json', payload.encode())
+
         else:
-            self.send_response(404)
-            self.end_headers()
+            self._send(404, 'text/plain', b'Not found')
+
+    def _send(self, code: int, ctype: str, body: bytes):
+        self.send_response(code)
+        self.send_header('Content-Type', ctype)
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
 
 def run_web_server():
     server = HTTPServer(('0.0.0.0', 8000), MapWebServer)
@@ -71,11 +130,12 @@ class RobotManagerNode(Node):
 
     def map_callback(self, msg: OccupancyGrid):
         """Converts raw OccupancyGrid data array into an image stream for the Web Server."""
-        global latest_map_img_bytes
+        global latest_map_img_bytes, map_received_count
         width = msg.info.width
         height = msg.info.height
         if width == 0 or height == 0:
             return
+        map_received_count += 1
 
         # Map grid values: -1 = Unknown (Gray), 0 = Free (White), 100 = Occupied (Black)
         img = Image.new('RGB', (width, height))
