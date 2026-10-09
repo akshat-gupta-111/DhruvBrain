@@ -17,8 +17,12 @@ class CmdVelBridge(Node):
             if os.path.exists(port):
                 try:
                     self.serial = serial.Serial(port, 115200, timeout=0.1)
+                    time.sleep(2.0)  # Wait for Arduino bootloader to finish
+                    self.serial.reset_input_buffer()
+                    self.serial.reset_output_buffer()
                     self.get_logger().info(f"[Bridge] Connected to Arduino on {port}")
                     self.serial.write(b"DURATION:RAW\n")
+                    self.serial.flush()
                     break
                 except Exception:
                     pass
@@ -53,11 +57,13 @@ class CmdVelBridge(Node):
             
         if self.serial:
             self.serial.write(cmd.encode())
+            self.serial.flush()
 
     def watchdog(self):
         if time.time() - self.last_msg_time > 0.4:
             if self.serial:
                 self.serial.write(b"<STOP>\n")
+                self.serial.flush()
 
 def main():
     rclpy.init()
