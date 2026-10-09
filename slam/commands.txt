@@ -1,281 +1,57 @@
 ================================================================================
-  DHRUV SLAM — SIMPLIFIED DOCKER COMPOSE WORKFLOW  (NEW — USE THIS)
+  DHRUV SLAM — SIMPLIFIED DOCKER COMPOSE WORKFLOW
   Hardware: NVIDIA Jetson Orin Nano | RPLidar A1 | ROS 2 Humble
 ================================================================================
 
-  Everything that used to require 4 separate terminals now runs with a SINGLE
-  command. The entrypoint.sh inside the container starts all ROS 2 nodes in
-  the correct dependency order automatically.
+  The old 4-terminal manual setup is fully obsolete. The entrypoint script 
+  inside the container now automatically starts all ROS 2 nodes in the exact 
+  order needed, and the web UI has replaced the old terminal menu.
 
-  ── FIRST TIME (build the image) ─────────────────────────────────────────────
+  ── FIRST TIME SETUP (or after editing dockerfile) ────────
 
     cd ~/Desktop/DhruvBrain/slam
     sudo docker compose build
 
-  ── DAILY USE ────────────────────────────────────────────────────────────────
+  ── DAILY USE (One Command) ───────────────────────────────
 
-    # Start the full SLAM stack (runs in the background)
+    # Start the full SLAM stack in the background
+    cd ~/Desktop/DhruvBrain/slam
     sudo docker compose up -d
 
-    # Attach to the interactive menu (set checkpoints, save map, navigate)
-    sudo docker attach dhruv-slam
+    # That's it! Everything is running.
 
-    # Detach WITHOUT stopping the container: press  Ctrl-P  then  Ctrl-Q
+  ── LIVE WEB UI (Control Panel) ───────────────────────────
 
-  ── STOP ─────────────────────────────────────────────────────────────────────
+    Go to:  http://<YOUR_JETSON_IP>:8000
 
+    You will see the live map stream and 4 colored buttons:
+      1. Status         - Check if the map is generating
+      2. Set Checkpoint - Drop a named pin where the robot is
+      3. Save Map       - Save the map and checkpoints to disk
+      4. Navigate To    - Pick a checkpoint and drive there!
+
+    You DO NOT need to attach to the terminal anymore. All controls 
+    and logs are visible directly in your browser.
+
+  ── STOPPING ──────────────────────────────────────────────
+
+    cd ~/Desktop/DhruvBrain/slam
     sudo docker compose down
 
-  ── LIVE MAP BROWSER ─────────────────────────────────────────────────────────
+  ── TROUBLESHOOTING ───────────────────────────────────────
 
-    http://<YOUR_JETSON_IP>:8000     (auto-refreshes every 2 seconds)
+    If the map doesn't show up in the browser, check the logs:
+    sudo docker compose logs -f slam
 
-  ── REBUILD AFTER CODE CHANGES ───────────────────────────────────────────────
+    (If you get LiDAR error 80008002, physically unplug the LiDAR USB 
+    cable, wait 3 seconds, plug it back in, and restart the container).
 
-    git pull
-    sudo docker compose build
-    sudo docker compose up -d
+  ── EDITING PYTHON CODE ───────────────────────────────────
 
-  NOTE: robot_manager.py is volume-mounted from the host (./robot_manager.py),
-        so edits to that file are picked up WITHOUT a rebuild — just restart:
-        sudo docker compose restart
+    You DO NOT need to rebuild the Docker image when you change python files.
+    The `robot_manager.py` file is hot-mounted from your Jetson host.
 
-================================================================================
-  DHRUV SLAM — LEGACY TERMINAL-BY-TERMINAL GUIDE  (kept for reference)
-  Hardware: NVIDIA Jetson Orin Nano | RPLidar A1 | ROS 2 Humble
-================================================================================
+    1. git pull (on Jetson host)
+    2. sudo docker compose restart
 
 ================================================================================
-PHASE 0: UPDATING & REBUILDING THE DOCKER IMAGE
-================================================================================
-  If you edit code on your Mac (like robot_manager.py), you must rebuild the
-  container on the Jetson to make it permanent. Run these OUTSIDE the container:
-
-  # 1. Stop and delete the currently running container
-  sudo docker stop my_robot_app 2>/dev/null || true
-  sudo docker rm -f my_robot_app 2>/dev/null || true
-
-  # 2. Pull the newest code
-  cd ~/Desktop/DhruvBrain
-  git pull
-
-  # 3. Rebuild the image
-  sudo docker build -t dhruv-slam -f slam/dockerfile .
-
-================================================================================
-PHASE 1: STARTUP (Do this after a fresh rebuild, or just on boot)
-================================================================================
-
-SETUP: SSH into your Jetson from your Mac in 4 separate Terminal tabs.
-  ssh dhruv@<YOUR_JETSON_IP>
-
-NOTE: The ROS environment MUST be sourced in EVERY new docker exec shell.
-      Every terminal below includes the full sourcing commands explicitly.
-
-================================================================================
-PHASE 1: BUILD AND START THE CONTAINER (ONE TIME SETUP)
-================================================================================
-
-  # 1. Go to your project folder on the Jetson
-  cd ~/Desktop/DhruvBrain/slam
-
-  # 2. Build the Docker image (takes ~10 min on first run, fast after)
-  sudo docker build -f dockerfile -t dhruv-slam .
-
-  # 3. Remove any old container if it exists
-  sudo docker rm -f my_robot_app 2>/dev/null || true
-
-  # 4. Start the interactive container (adding 'bash' at the end stops it from auto-running the old script)
-  sudo docker run -it \
-    --name=my_robot_app \
-    --privileged \
-    --net=host \
-    -e ROS_LOCALHOST_ONLY=1 \
-    -v /dev:/dev \
-    -v ~/:/root/ \
-    dhruv-slam \
-    bash
-
-  # 5. Start the live Robot Manager (from your shared folder, so it auto-updates!)
-  source /opt/ros/humble/setup.bash
-  source /workspace/rf2o_ws/install/setup.bash
-  python3 /root/Desktop/DhruvBrain/slam/robot_manager.py
-
-  → Terminal 1 will show the Python menu. Keep it here.
-
-================================================================================
-TERMINAL 1 — Robot Manager (Interactive Menu)
-================================================================================
-
-  # Already running from Phase 1 above.
-  # You will see this menu:
-  #   1: start_mapping
-  #   2: set_checkpoint
-  #   3: save
-  #   4: test_mapping
-  #   5: exit
-
-  TYPE: 1   (then press Enter to start mapping mode)
-
-================================================================================
-TERMINAL 2 — RPLidar A1 Sensor Node
-================================================================================
-
-  # SSH into Jetson, then enter the container
-  sudo docker exec -it my_robot_app bash
-
-  # Source ROS environment (REQUIRED in every new shell)
-  source /opt/ros/humble/setup.bash
-  source /workspace/rf2o_ws/install/setup.bash
-
-  # Install ros2 tools if not yet in image (skip after rebuild)
-  apt-get install -y ros-humble-ros2topic ros-humble-ros2node ros-humble-ros2run 2>/dev/null || true
-
-  # Launch the RPLidar A1 node (publishes /scan topic at 10Hz)
-  ros2 launch rplidar_ros rplidar_a1_launch.py
-
-  → You should see: "RPLidar health status : OK" and scan frequency: 10.0 Hz
-
-================================================================================
-TERMINAL 3 — RF2O Laser Odometry (converts /scan → /odom)
-================================================================================
-
-  # SSH into Jetson, then enter the container
-  sudo docker exec -it my_robot_app bash
-
-  # Source ROS environment (REQUIRED in every new shell)
-  source /opt/ros/humble/setup.bash
-  source /workspace/rf2o_ws/install/setup.bash
-
-  # First, publish the physical location of the LiDAR on the robot (1.6m high)
-  # This links 'base_link' (robot center) to 'laser' (sensor)
-  ros2 run tf2_ros static_transform_publisher 0 0 1.6 0 0 0 base_link laser &
-
-  # Second, link 'base_link' to 'base_footprint'. slam_toolbox defaults to 
-  # base_footprint, so this prevents the "Failed to compute odom pose" error!
-  ros2 run tf2_ros static_transform_publisher 0 0 0 0 0 0 base_link base_footprint &
-
-  # Launch RF2O using the official launch file instead of the raw node
-  ros2 launch rf2o_laser_odometry rf2o_laser_odometry.launch.py \
-    laser_scan_topic:=/scan \
-    odom_topic:=/odom \
-    publish_tf:=true \
-    base_frame_id:=base_link \
-    odom_frame_id:=odom
-
-  → Wait for Terminal 2 (LiDAR) to be running first!
-  → You should see scan data flowing instead of "Waiting for laser_scans"
-
-================================================================================
-TERMINAL 4 — SLAM Toolbox (builds the map)
-================================================================================
-
-  # SSH into Jetson, then enter the container
-  sudo docker exec -it my_robot_app bash
-
-  # Source ROS environment (REQUIRED in every new shell)
-  source /opt/ros/humble/setup.bash
-  source /workspace/rf2o_ws/install/setup.bash
-
-  # Launch the SLAM mapper (must use real time, not sim time)
-  ros2 launch slam_toolbox online_async_launch.py use_sim_time:=false
-
-  → You should see: "CeresSolver: Using SCHUR_JACOBI preconditioner"
-
-================================================================================
-TERMINAL 5 — DIAGNOSTICS (verify everything is connected)
-================================================================================
-
-  # SSH into Jetson, then enter the container
-  sudo docker exec -it my_robot_app bash
-
-  # Source ROS environment
-  source /opt/ros/humble/setup.bash
-  source /workspace/rf2o_ws/install/setup.bash
-
-  # Check all active topics (you must see /scan, /odom, /map)
-  ros2 topic list
-
-  # Verify scan data is flowing at ~10Hz
-  ros2 topic hz /scan
-
-  # Verify odometry is publishing
-  ros2 topic hz /odom
-
-  # Verify SLAM map is publishing
-  ros2 topic hz /map
-
-================================================================================
-PHASE 2: LIVE BROWSER MAP VIEW
-================================================================================
-
-  Open on your Mac browser:
-    http://<YOUR_JETSON_IP>:8000
-
-  → The map will be BLANK (404) until SLAM has enough data to publish /map.
-  → Drive the robot around for 10-20 seconds and the map will appear!
-  → It auto-refreshes every 2 seconds.
-
-================================================================================
-PHASE 3: RECORD CHECKPOINTS WHILE MAPPING
-================================================================================
-
-  Drive the robot to a location you want to save, then:
-
-  [Terminal 1] → Type: 2  (set_checkpoint)
-  Enter name: desk_area
-
-  Repeat for other locations:
-  [Terminal 1] → Type: 2
-  Enter name: door_exit
-
-  [Terminal 1] → Type: 2
-  Enter name: charging_station
-
-================================================================================
-PHASE 4: SAVE THE MAP
-================================================================================
-
-  [Terminal 1] → Type: 3  (save)
-  Enter prefix: apartment
-
-  → This writes to your Jetson home folder (~/ which is mounted as /root/):
-      /root/apartment_map.yaml
-      /root/apartment_map.pgm
-      /root/apartment_checkpoints.json
-
-================================================================================
-PHASE 5: SWITCH TO NAVIGATION MODE (autonomous point-to-point)
-================================================================================
-
-  Step 1: Stop SLAM in Terminal 4 → Press Ctrl+C
-          (Keep Terminals 2 and 3 running! LiDAR and odometry must stay alive.)
-
-  Step 2: In Terminal 4, start Nav2 navigation stack:
-    sudo docker exec -it my_robot_app bash
-    source /opt/ros/humble/setup.bash
-    source /workspace/rf2o_ws/install/setup.bash
-    ros2 launch nav2_bringup bringup_launch.py \
-      map:=/root/apartment_map.yaml \
-      use_sim_time:=false
-
-  Step 3: [Terminal 1] → Type: 4  (test_mapping)
-    Enter room map name: apartment
-    Enter target checkpoint: desk_area
-
-  → Nav2 will autonomously navigate to the saved checkpoint!
-  → It uses the live LiDAR costmap to avoid unexpected obstacles.
-
-================================================================================
-STARTUP ORDER (CRITICAL — follow exactly):
-  1. Terminal 2: LiDAR node   (must be first — others depend on /scan)
-  2. Terminal 3: RF2O odom    (needs /scan to be live)
-  3. Terminal 4: SLAM toolbox (needs /scan + /odom)
-  4. Terminal 1: Menu → type 1
-  5. Browser: open http://<IP>:8000
-================================================================================
-
-
-
-
-
