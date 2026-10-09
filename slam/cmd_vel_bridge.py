@@ -52,14 +52,14 @@ class CmdVelBridge(Node):
         # Give priority to turning if Nav2 wants to spin (z is much larger than x)
         if abs(z) > abs(x) * 2.0 and abs(z) > 0.02:
             if z > 0:
-                cmd = "<PIVOT_L,255,0>\n"
+                cmd = "<PIVOT_L,255,200>\n"
             else:
-                cmd = "<PIVOT_R,255,0>\n"
+                cmd = "<PIVOT_R,255,200>\n"
         else:
             if x > 0.01:
-                cmd = "<FWD,255,0>\n"
+                cmd = "<FWD,255,200>\n"
             elif x < -0.01:
-                cmd = "<REV,255,0>\n"
+                cmd = "<REV,255,200>\n"
             
         # Log every half second so we can see what Nav2 is doing without flooding
         if time.time() - getattr(self, '_last_print', 0) > 0.5:
