@@ -13,7 +13,7 @@ class CmdVelBridge(Node):
         
         # Connect to Arduino (trying all standard ports)
         self.serial = None
-        for port in ["/dev/ttyACM0", "/dev/ttyACM1", "/dev/ttyUSB0", "/dev/ttyUSB1"]:
+        for port in ["/dev/ttyACM0", "/dev/ttyACM1", "/dev/ttyUSB1", "/dev/ttyUSB0"]:
             if os.path.exists(port):
                 try:
                     self.serial = serial.Serial(port, 115200, timeout=0.1)
@@ -42,15 +42,15 @@ class CmdVelBridge(Node):
         cmd = "<STOP>\n"
         
         # Give priority to turning if Nav2 wants to spin (z is much larger than x)
-        if abs(z) > abs(x) * 2.0 and abs(z) > 0.1:
+        if abs(z) > abs(x) * 2.0 and abs(z) > 0.02:
             if z > 0:
                 cmd = "<PIVOT_L,255,0>\n"
             else:
                 cmd = "<PIVOT_R,255,0>\n"
         else:
-            if x > 0.05:
+            if x > 0.01:
                 cmd = "<FWD,255,0>\n"
-            elif x < -0.05:
+            elif x < -0.01:
                 cmd = "<REV,255,0>\n"
             
         # Log every half second so we can see what Nav2 is doing without flooding
