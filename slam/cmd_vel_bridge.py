@@ -13,17 +13,25 @@ class CmdVelBridge(Node):
         
         # Connect to Arduino (trying all standard ports)
         self.serial = None
-        for port in ["/dev/ttyACM0", "/dev/ttyACM1", "/dev/ttyUSB1", "/dev/ttyUSB0"]:
+        for port in ["/dev/ttyACM0", "/dev/ttyACM1", "/dev/ttyUSB1", "/dev/ttyUSB0", "/dev/ttyUSB2", "/dev/ttyUSB3"]:
             if os.path.exists(port):
                 try:
-                    self.serial = serial.Serial(port, 115200, timeout=0.1)
+                    s = serial.Serial(port, 115200, timeout=0.5)
                     time.sleep(2.0)  # Wait for Arduino bootloader to finish
-                    self.serial.reset_input_buffer()
-                    self.serial.reset_output_buffer()
-                    self.get_logger().info(f"[Bridge] Connected to Arduino on {port}")
-                    self.serial.write(b"DURATION:RAW\n")
-                    self.serial.flush()
-                    break
+                    
+                    # Read boot messages to verify this is actually our Arduino!
+                    boot_msg = s.read(1000).decode('utf-8', errors='ignore')
+                    if "DHRUVBRAIN" in boot_msg or "Arbitrator" in boot_msg or "AUTONOMOUS" in boot_msg:
+                        self.serial = s
+                        self.serial.reset_input_buffer()
+                        self.serial.reset_output_buffer()
+                        self.get_logger().info(f"[Bridge] Verified Arduino on {port}")
+                        self.serial.write(b"DURATION:RAW\n")
+                        self.serial.flush()
+                        break
+                    else:
+                        self.get_logger().info(f"[Bridge] Port {port} is not the Arduino. Skipping.")
+                        s.close()
                 except Exception:
                     pass
                     
