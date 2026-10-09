@@ -503,16 +503,16 @@ class RobotManagerNode(Node):
         goal = NavigateToPose.Goal()
         goal.pose.header.frame_id = 'map'
         goal.pose.header.stamp = self.get_clock().now().to_msg()
-        goal.pose.pose.position.x = pt['x']
-        goal.pose.pose.position.y = pt['y']
-        goal.pose.pose.position.z = pt['z']
-        goal.pose.pose.orientation.x = pt['qx']
-        goal.pose.pose.orientation.y = pt['qy']
-        goal.pose.pose.orientation.z = pt['qz']
-        goal.pose.pose.orientation.w = pt['qw']
+        goal.pose.pose.position.x = float(pt['x'])
+        goal.pose.pose.position.y = float(pt['y'])
+        goal.pose.pose.position.z = float(pt['z'])
+        goal.pose.pose.orientation.x = float(pt['qx'])
+        goal.pose.pose.orientation.y = float(pt['qy'])
+        goal.pose.pose.orientation.z = float(pt['qz'])
+        goal.pose.pose.orientation.w = float(pt['qw'])
         
-        send_goal_future = self.nav_client.send_goal_async(goal, feedback_callback=self._nav_feedback_cb)
-        send_goal_future.add_done_callback(self._nav_goal_response_cb)
+        self.send_goal_future = self.nav_client.send_goal_async(goal, feedback_callback=self._nav_feedback_cb)
+        self.send_goal_future.add_done_callback(self._nav_goal_response_cb)
 
     def _nav_feedback_cb(self, feedback_msg):
         eta = feedback_msg.feedback.estimated_time_remaining
