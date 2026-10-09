@@ -25,7 +25,7 @@ cleanup() {
     echo ""
     echo "[SHUTDOWN] Stopping all SLAM nodes..."
     # Kill by PID if we have them, fall back to killall for safety
-    kill "$SLAM_PID" "$RF2O_PID" "$LIDAR_PID" "$TF_LASER_PID" "$TF_FOOTPRINT_PID" 2>/dev/null || true
+    kill "$SLAM_PID" "$RF2O_PID" "$LIDAR_PID" "$TF_LASER_PID" "$TF_FOOTPRINT_PID" "$BRIDGE_PID" "$NAV2_PID" 2>/dev/null || true
     wait 2>/dev/null || true
     echo "[SHUTDOWN] All nodes stopped. Goodbye."
 }
@@ -100,6 +100,29 @@ SLAM_PID=$!
 
 # SLAM toolbox takes ~5-10 s to initialise Ceres solver
 echo "      Allowing SLAM Toolbox 10 s to initialise..."
+sleep 10
+
+# -----------------------------------------------------------------------------
+# STEP 5 — ROS-Arduino Bridge (translates /cmd_vel to <FWD> strings)
+# -----------------------------------------------------------------------------
+echo "[5/6] Starting ROS-Arduino Bridge..."
+if [ -f /workspace/src_live/cmd_vel_bridge.py ]; then
+    python3 /workspace/src_live/cmd_vel_bridge.py >/tmp/bridge.log 2>&1 &
+else
+    python3 /workspace/cmd_vel_bridge.py >/tmp/bridge.log 2>&1 &
+fi
+BRIDGE_PID=$!
+
+sleep 2
+
+# -----------------------------------------------------------------------------
+# STEP 6 — Nav2 Navigation Stack (Planner, Controller, BT Navigator)
+# -----------------------------------------------------------------------------
+echo "[6/6] Starting Nav2 Navigation Stack..."
+ros2 launch nav2_bringup navigation_launch.py use_sim_time:=false >/tmp/nav2.log 2>&1 &
+NAV2_PID=$!
+
+echo "      Allowing Nav2 10 s to initialise action servers..."
 sleep 10
 
 # -----------------------------------------------------------------------------
