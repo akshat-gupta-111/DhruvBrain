@@ -19,11 +19,15 @@ class CmdVelBridge(Node):
                     time.sleep(2.0)  # Just in case it needs time
                     self.serial.reset_input_buffer()
                     self.serial.reset_output_buffer()
-                    self.get_logger().info(f"[Bridge] Connected to Arduino on {port}")
+                    self.get_logger().info(f"[Bridge] jetson-slam connected to arduino on {port}")
                     self.serial.write(b"MODE:AUTO\n")
                     self.serial.flush()
                     time.sleep(0.1)
                     self.serial.write(b"DURATION:RAW\n")
+                    self.serial.flush()
+                    time.sleep(0.1)
+                    # Send a test message to prove connection (LED turns green)
+                    self.serial.write(b"<LED,CURIOSITY_GREEN>\n")
                     self.serial.flush()
                     break
                 except Exception:
@@ -46,14 +50,14 @@ class CmdVelBridge(Node):
         # Give priority to turning if Nav2 wants to spin (z is much larger than x)
         if abs(z) > abs(x) * 2.0 and abs(z) > 0.02:
             if z > 0:
-                cmd = "<PIVOT_L,255,200>\n"
+                cmd = "<PIVOT_L,150,200>\n"
             else:
-                cmd = "<PIVOT_R,255,200>\n"
+                cmd = "<PIVOT_R,150,200>\n"
         else:
             if x > 0.01:
-                cmd = "<FWD,255,200>\n"
+                cmd = "<FWD,150,200>\n"
             elif x < -0.01:
-                cmd = "<REV,255,200>\n"
+                cmd = "<REV,150,200>\n"
             
         # Log every half second so we can see what Nav2 is doing without flooding
         if time.time() - getattr(self, '_last_print', 0) > 0.5:
