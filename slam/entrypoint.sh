@@ -50,16 +50,7 @@ sleep 2
 # STEP 2 — RPLidar A1  (must be first — everything subscribes to /scan)
 # -----------------------------------------------------------------------------
 echo "[2/4] Starting RPLidar A1 node..."
-
-# Fix port enumeration: if replugging caused the LiDAR to become ttyUSB1/2,
-# symlink it back to ttyUSB0 so the rplidar node can always find it.
-ACTUAL_PORT=$(ls /dev/ttyUSB* 2>/dev/null | head -n 1)
-if [ -n "$ACTUAL_PORT" ] && [ "$ACTUAL_PORT" != "/dev/ttyUSB0" ]; then
-    echo "      Found LiDAR on $ACTUAL_PORT (symlinking to /dev/ttyUSB0)"
-    ln -sf "$ACTUAL_PORT" /dev/ttyUSB0
-fi
-
-ros2 launch rplidar_ros rplidar_a1_launch.py >/tmp/lidar.log 2>&1 &
+ros2 launch rplidar_ros rplidar_a1_launch.py >/dev/null 2>&1 &
 LIDAR_PID=$!
 
 # /scan is the only HARD dependency — no LiDAR means nothing works.
