@@ -61,7 +61,9 @@ class CmdVelBridge(Node):
             self._last_print = time.time()
             
         if self.serial:
-            self.serial.write(cmd.encode())
+            # Format exactly like hal_jetson.py to bypass any Arduino parsing bugs
+            full_payload = f"{cmd.strip()}|<LED,CURIOSITY_GREEN>\n"
+            self.serial.write(full_payload.encode('utf-8'))
             self.serial.flush()
 
     def watchdog(self):
