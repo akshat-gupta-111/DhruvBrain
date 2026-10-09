@@ -104,7 +104,7 @@ RUN sed -i '/robot_ws/d' /root/.bashrc && \
 
 RUN python3 -m pip install \
       --no-cache-dir \
-      Pillow
+      Pillow pyserial
 
 # -------------------------------------------------
 # 6. Clone RF2O ROS 2 repository
