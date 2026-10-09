@@ -67,6 +67,9 @@ echo "      Waiting for /scan topic (up to 30 s)..."
 MAX_WAIT=30
 WAITED=0
 until ros2 topic list 2>/dev/null | grep -q "^/scan$"; do
+    # Force the ROS node to start the physical motor (assert DTR)
+    ros2 service call /start_motor std_srvs/srv/Empty "{}" >/dev/null 2>&1 || true
+    
     sleep 1
     WAITED=$((WAITED + 1))
     if [ "$WAITED" -ge "$MAX_WAIT" ]; then
