@@ -68,11 +68,18 @@ python3 -c "
 import serial, time
 try:
     s = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)
+    # 1. Stop motor and send STOP command
     s.setDTR(False)
     time.sleep(0.1)
-    s.write(b'\xa5\x25') # STOP command
+    s.write(b'\xa5\x25') # STOP
     time.sleep(0.1)
+    
+    # 2. Flush buffers
     s.reset_input_buffer()
+    
+    # 3. Turn the motor BACK ON! (rplidar_ros sometimes fails to do this)
+    s.setDTR(True)
+    time.sleep(0.5)
     s.close()
 except:
     pass
