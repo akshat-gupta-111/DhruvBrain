@@ -59,32 +59,6 @@ if [ -n "$ACTUAL_PORT" ] && [ "$ACTUAL_PORT" != "/dev/ttyUSB0" ]; then
     ln -sf "$ACTUAL_PORT" /dev/ttyUSB0
 fi
 
-# REPLICATING hal_jetson.py BEHAVIOR:
-# hal_jetson.py works flawlessly because it explicitly sends STOP and STOP_MOTOR
-# commands to flush the LiDAR buffer before attempting to read scans.
-# rplidar_ros does not do this, leading to the 80008002 crash!
-echo "      Flushing LiDAR hardware buffers (matching hal_jetson.py)..."
-python3 -c "
-import serial, time
-try:
-    s = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)
-    # 1. Stop motor and send STOP command
-    s.setDTR(False)
-    time.sleep(0.1)
-    s.write(b'\xa5\x25') # STOP
-    time.sleep(0.1)
-    
-    # 2. Flush buffers
-    s.reset_input_buffer()
-    
-    # 3. Turn the motor BACK ON! (rplidar_ros sometimes fails to do this)
-    s.setDTR(True)
-    time.sleep(0.5)
-    s.close()
-except:
-    pass
-"
-
 ros2 launch rplidar_ros rplidar_a1_launch.py >/tmp/lidar.log 2>&1 &
 LIDAR_PID=$!
 
