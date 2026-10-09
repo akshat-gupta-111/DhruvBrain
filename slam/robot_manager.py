@@ -16,7 +16,9 @@ from rclpy.node import Node
 from nav_msgs.msg import OccupancyGrid
 from geometry_msgs.msg import PoseStamped
 from tf2_ros import Buffer, TransformListener
-from nav2_simple_commander.robot_navigator import BasicNavigator, TaskResult
+from nav2_msgs.action import NavigateToPose
+from rclpy.action import ActionClient
+from rclpy.task import Future
 
 # ── Globals ──────────────────────────────────────────────────────────────────
 latest_map_img_bytes = b""
@@ -488,6 +490,45 @@ class RobotManagerNode(Node):
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
         self.checkpoints = {}
+        self.nav_client = ActionClient(self, NavigateToPose, 'navigate_to_pose')
+
+    def send_nav_goal(self, pt, checkpoint_name):
+        _log(f"[NAV] Waiting for NavigateToPose action server...")
+        if not self.nav_client.wait_for_server(timeout_sec=3.0):
+            _log("[ERROR] Nav2 Action Server not available. Is Nav2 running?")
+            return
+            
+        _log(f"[NAV] Sending goal for '{checkpoint_name}'...")
+        goal = NavigateToPose.Goal()
+        goal.pose.header.frame_id = 'map'
+        goal.pose.header.stamp = self.get_clock().now().to_msg()
+        goal.pose.pose.position.x = pt['x']
+        goal.pose.pose.position.y = pt['y']
+        goal.pose.pose.position.z = pt['z']
+        goal.pose.pose.orientation.x = pt['qx']
+        goal.pose.pose.orientation.y = pt['qy']
+        goal.pose.pose.orientation.z = pt['qz']
+        goal.pose.pose.orientation.w = pt['qw']
+        
+        send_goal_future = self.nav_client.send_goal_async(goal, feedback_callback=self._nav_feedback_cb)
+        send_goal_future.add_done_callback(self._nav_goal_response_cb)
+
+    def _nav_feedback_cb(self, feedback_msg):
+        eta = feedback_msg.feedback.estimated_time_remaining
+        _log(f"[NAV] ETA: {eta.sec + eta.nanosec*1e-9:.1f}s")
+
+    def _nav_goal_response_cb(self, future):
+        goal_handle = future.result()
+        if not goal_handle.accepted:
+            _log("[NAV] Goal rejected by Nav2 server!")
+            return
+        _log("[NAV] Goal accepted, calculating path...")
+        self._get_result_future = goal_handle.get_result_async()
+        self._get_result_future.add_done_callback(self._nav_result_cb)
+
+    def _nav_result_cb(self, future):
+        result = future.result().status
+        _log(f"[NAV] Navigation completed with status code: {result} (4=SUCCEEDED)")
 
     def map_callback(self, msg: OccupancyGrid):
         global latest_map_img_bytes, map_received_count
@@ -610,31 +651,8 @@ def _handle_command(node, payload):
         if checkpoint not in saved:
             _log(f"[ERROR] Checkpoint '{checkpoint}' not in map '{map_name}'"); return
         
-        def _nav():
-            pt = saved[checkpoint]
-            _log(f"[NAV] Driving to '{checkpoint}' on map '{map_name}'...")
-            nav = BasicNavigator()
-            goal = PoseStamped()
-            goal.header.frame_id = 'map'
-            goal.header.stamp = nav.get_clock().now().to_msg()
-            goal.pose.position.x = pt['x']
-            goal.pose.position.y = pt['y']
-            goal.pose.position.z = pt['z']
-            goal.pose.orientation.x = pt['qx']
-            goal.pose.orientation.y = pt['qy']
-            goal.pose.orientation.z = pt['qz']
-            goal.pose.orientation.w = pt['qw']
-            nav.goToPose(goal)
-            while not nav.isTaskComplete():
-                fb = nav.getFeedback()
-                if fb:
-                    eta = fb.estimated_time_remaining
-                    _log(f"[NAV] ETA: {eta.sec + eta.nanosec*1e-9:.1f}s")
-                time.sleep(2.0)
-            r = nav.getResult()
-            _log(f"[NAV] {'SUCCESS' if r == TaskResult.SUCCEEDED else 'FAILED'} — '{checkpoint}'")
-
-        threading.Thread(target=_nav, daemon=True).start()
+        pt = saved[checkpoint]
+        node.send_nav_goal(pt, checkpoint)
 
     elif cmd == 5:
         _log("[EXIT] Shutting down...")
