@@ -11,30 +11,43 @@ class CmdVelBridge(Node):
         super().__init__('cmd_vel_bridge')
         self.subscription = self.create_subscription(Twist, '/cmd_vel', self.vel_callback, 10)
         # Connect to Arduino (only ACM ports to protect LiDAR)
+        # Connect to Arduino (only ACM ports to protect LiDAR)
         self.serial = None
-        for port in ["/dev/ttyACM0", "/dev/ttyACM1", "/dev/ttyACM2"]:
+        for port in ["/dev/ttyACM0", "/dev/ttyACM1", "/dev/ttyACM2", "/dev/ttyUSB0", "/dev/ttyUSB1"]:
             if os.path.exists(port):
                 try:
-                    self.serial = serial.Serial(port, 115200, timeout=0.1)
-                    time.sleep(2.0)  # Just in case it needs time
-                    self.serial.reset_input_buffer()
-                    self.serial.reset_output_buffer()
-                    self.get_logger().info(f"[Bridge] jetson-slam connected to arduino on {port}")
-                    self.serial.write(b"MODE:AUTO\n")
-                    self.serial.flush()
-                    time.sleep(0.1)
-                    self.serial.write(b"DURATION:RAW\n")
-                    self.serial.flush()
-                    time.sleep(0.1)
-                    # Send a test message to prove connection (LED turns green)
-                    self.serial.write(b"<LED,CURIOSITY_GREEN>\n")
-                    self.serial.flush()
-                    break
-                except Exception:
+                    s = serial.Serial(port, 115200, timeout=1.0, write_timeout=1.0)
+                    time.sleep(2.0)  # Wait for boot
+                    s.reset_input_buffer()
+                    s.reset_output_buffer()
+                    
+                    # Test if the port is ALIVE by asking for status
+                    s.write(b"MODE?\n")
+                    s.flush()
+                    
+                    # Wait for a response (it should instantly say MODE:AUTO or MODE:MANUAL)
+                    response = s.read(100).decode('utf-8', errors='ignore')
+                    if "MODE:" in response or "CABLE" in response:
+                        self.serial = s
+                        self.get_logger().info(f"[Bridge] jetson-slam connected to live arduino on {port}")
+                        self.serial.write(b"MODE:AUTO\n")
+                        self.serial.flush()
+                        time.sleep(0.1)
+                        self.serial.write(b"DURATION:RAW\n")
+                        self.serial.flush()
+                        time.sleep(0.1)
+                        self.serial.write(b"<LED,CURIOSITY_GREEN>\n")
+                        self.serial.flush()
+                        break
+                    else:
+                        self.get_logger().warn(f"[Bridge] Port {port} is a zombie or unresponsive. Skipping.")
+                        s.close()
+                except Exception as e:
+                    self.get_logger().warn(f"[Bridge] Failed on {port}: {e}")
                     pass
                     
         if not self.serial:
-            self.get_logger().error("[Bridge] Could not find Arduino USB port!")
+            self.get_logger().error("[Bridge] Could not find any responsive Arduino USB port!")
 
         self.last_msg_time = time.time()
         # Safety watchdog: if Nav2 crashes or stops sending cmds, stop the robot!
