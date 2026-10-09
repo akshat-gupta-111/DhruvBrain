@@ -60,11 +60,15 @@ class CmdVelBridge(Node):
             self.get_logger().info(f"Nav2 sending cmd_vel -> x: {x:.2f}, z: {z:.2f} | Sending to Arduino: {cmd.strip()}")
             self._last_print = time.time()
             
-        if self.serial:
-            # Format exactly like hal_jetson.py to bypass any Arduino parsing bugs
-            full_payload = f"{cmd.strip()}|<LED,CURIOSITY_GREEN>\n"
-            self.serial.write(full_payload.encode('utf-8'))
-            self.serial.flush()
+        now = time.time()
+        # Rate-limit to prevent overflowing the Arduino's 64-byte serial buffer.
+        # Send immediately if command changes, otherwise refresh every 100ms.
+        if cmd != getattr(self, '_last_cmd', '') or (now - getattr(self, '_last_send_time', 0)) > 0.1:
+            if self.serial:
+                self.serial.write(cmd.encode('utf-8'))
+                self.serial.flush()
+            self._last_cmd = cmd
+            self._last_send_time = now
 
     def watchdog(self):
         if time.time() - self.last_msg_time > 0.4:
