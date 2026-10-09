@@ -10,27 +10,19 @@ class CmdVelBridge(Node):
     def __init__(self):
         super().__init__('cmd_vel_bridge')
         self.subscription = self.create_subscription(Twist, '/cmd_vel', self.vel_callback, 10)
-        # Connect to Arduino
+        # Connect to Arduino (only ACM ports to protect LiDAR)
         self.serial = None
         for port in ["/dev/ttyACM0", "/dev/ttyACM1", "/dev/ttyACM2"]:
             if os.path.exists(port):
                 try:
-                    s = serial.Serial(port, 115200, timeout=1.0, exclusive=True)
-                    time.sleep(3.0)  # Wait for Arduino bootloader to finish
-                    
-                    # Read boot messages to verify this is actually our Arduino!
-                    boot_msg = s.read(1000).decode('utf-8', errors='ignore')
-                    if "DHRUVBRAIN" in boot_msg or "Arbitrator" in boot_msg or "AUTONOMOUS" in boot_msg:
-                        self.serial = s
-                        self.serial.reset_input_buffer()
-                        self.serial.reset_output_buffer()
-                        self.get_logger().info(f"[Bridge] Verified Arduino on {port}")
-                        self.serial.write(b"DURATION:RAW\n")
-                        self.serial.flush()
-                        break
-                    else:
-                        self.get_logger().info(f"[Bridge] Port {port} is not the Arduino. Skipping.")
-                        s.close()
+                    self.serial = serial.Serial(port, 115200, timeout=0.1)
+                    time.sleep(2.0)  # Just in case it needs time
+                    self.serial.reset_input_buffer()
+                    self.serial.reset_output_buffer()
+                    self.get_logger().info(f"[Bridge] Connected to Arduino on {port}")
+                    self.serial.write(b"DURATION:RAW\n")
+                    self.serial.flush()
+                    break
                 except Exception:
                     pass
                     
