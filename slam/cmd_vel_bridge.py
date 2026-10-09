@@ -69,16 +69,24 @@ class CmdVelBridge(Node):
         # Send immediately if command changes, otherwise refresh every 100ms.
         if cmd != getattr(self, '_last_cmd', '') or (now - getattr(self, '_last_send_time', 0)) > 0.1:
             if self.serial:
-                self.serial.write(cmd.encode('utf-8'))
-                self.serial.flush()
+                try:
+                    self.serial.write(cmd.encode('utf-8'))
+                    self.serial.flush()
+                except Exception as e:
+                    self.get_logger().error(f"Serial write failed! Did the Arduino brown-out and disconnect? {e}")
+                    self.serial = None
             self._last_cmd = cmd
             self._last_send_time = now
 
     def watchdog(self):
         if time.time() - self.last_msg_time > 0.4:
             if self.serial:
-                self.serial.write(b"<STOP>\n")
-                self.serial.flush()
+                try:
+                    self.serial.write(b"<STOP>\n")
+                    self.serial.flush()
+                except Exception as e:
+                    self.get_logger().error(f"Watchdog serial write failed: {e}")
+                    self.serial = None
 
 def main():
     rclpy.init()
