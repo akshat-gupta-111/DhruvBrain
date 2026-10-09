@@ -123,6 +123,10 @@ class MapWebServer(BaseHTTPRequestHandler):
             else:
                 downloads_html = '<div class="card"><p style="color:#555">No saved maps yet. Use the Save Map button.</p></div>'
 
+            map_opts = '<option value="LIVE">Live Map (Current Session)</option>'
+            for m in sorted(saved.keys()):
+                map_opts += f'<option value="{m}">{m}</option>'
+
             snap_btn = '<a class="btn" href="/snapshot.png">&#11123; Live map (.png)</a>' if has_map else '<span class="btn disabled">Live PNG (no map yet)</span>'
 
             with _log_lock:
@@ -258,8 +262,11 @@ class MapWebServer(BaseHTTPRequestHandler):
   <div class="mb" id="m-nav">
     <div class="md">
       <h3>&#128663; Navigate To Checkpoint</h3>
-      <input id="nav-map" type="text" placeholder="Map name (e.g. incubation)" oninput="loadCPs()">
-      <select id="nav-cp"><option value="">-- type map name first --</option></select>
+      <select id="nav-map" onchange="loadCPs()">
+        <option value="" disabled selected>-- Select Map --</option>
+        {map_opts}
+      </select>
+      <select id="nav-cp"><option value="">-- select map first --</option></select>
       <div class="mbtns">
         <button class="bcancel" onclick="hideModal('m-nav')">Cancel</button>
         <button class="bok" onclick="doNav()">Go!</button>
@@ -588,17 +595,24 @@ def _handle_command(node, payload):
     elif cmd == 4:
         map_name   = payload.get('map_name', '').strip()
         checkpoint = payload.get('checkpoint', '').strip()
-        cp_file    = f"/root/{map_name}_checkpoints.json"
-        if not os.path.exists(cp_file):
-            _log(f"[ERROR] Map '{map_name}' not found at {cp_file}"); return
-        with open(cp_file) as f:
-            saved = json.load(f)
+        
+        if map_name == 'LIVE':
+            saved = node.checkpoints
+            if not saved:
+                _log("[ERROR] No checkpoints set in current Live session yet."); return
+        else:
+            cp_file = f"/root/{map_name}_checkpoints.json"
+            if not os.path.exists(cp_file):
+                _log(f"[ERROR] Map '{map_name}' not found at {cp_file}"); return
+            with open(cp_file) as f:
+                saved = json.load(f)
+                
         if checkpoint not in saved:
             _log(f"[ERROR] Checkpoint '{checkpoint}' not in map '{map_name}'"); return
-
+        
         def _nav():
             pt = saved[checkpoint]
-            _log(f"[NAV] Driving to '{checkpoint}'...")
+            _log(f"[NAV] Driving to '{checkpoint}' on map '{map_name}'...")
             nav = BasicNavigator()
             goal = PoseStamped()
             goal.header.frame_id = 'map'
