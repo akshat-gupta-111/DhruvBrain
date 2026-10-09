@@ -20,6 +20,9 @@ class CmdVelBridge(Node):
                     self.serial.reset_input_buffer()
                     self.serial.reset_output_buffer()
                     self.get_logger().info(f"[Bridge] Connected to Arduino on {port}")
+                    self.serial.write(b"MODE:AUTO\n")
+                    self.serial.flush()
+                    time.sleep(0.1)
                     self.serial.write(b"DURATION:RAW\n")
                     self.serial.flush()
                     break
