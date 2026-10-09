@@ -10,10 +10,9 @@ class CmdVelBridge(Node):
     def __init__(self):
         super().__init__('cmd_vel_bridge')
         self.subscription = self.create_subscription(Twist, '/cmd_vel', self.vel_callback, 10)
-        
-        # Connect to Arduino (trying all standard ports)
+        # Connect to Arduino
         self.serial = None
-        for port in ["/dev/ttyACM0", "/dev/ttyACM1", "/dev/ttyUSB1", "/dev/ttyUSB0", "/dev/ttyUSB2", "/dev/ttyUSB3"]:
+        for port in ["/dev/ttyACM0", "/dev/ttyACM1", "/dev/ttyACM2"]:
             if os.path.exists(port):
                 try:
                     s = serial.Serial(port, 115200, timeout=1.0, exclusive=True)
