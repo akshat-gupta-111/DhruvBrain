@@ -35,7 +35,6 @@ class CmdVelBridge(Node):
         x = msg.linear.x
         z = msg.angular.z
         
-        # Translate ROS Twist into Dhruv's custom serial strings
         cmd = "<STOP>\n"
         
         if x > 0.05:
@@ -46,6 +45,11 @@ class CmdVelBridge(Node):
             cmd = "<PIVOT_L,150,0>\n"
         elif z < -0.1:
             cmd = "<PIVOT_R,150,0>\n"
+            
+        # Log every half second so we can see what Nav2 is doing without flooding
+        if time.time() - getattr(self, '_last_print', 0) > 0.5:
+            self.get_logger().info(f"Nav2 sending cmd_vel -> x: {x:.2f}, z: {z:.2f} | Sending to Arduino: {cmd.strip()}")
+            self._last_print = time.time()
             
         if self.serial:
             self.serial.write(cmd.encode())
