@@ -16,8 +16,8 @@ class CmdVelBridge(Node):
         for port in ["/dev/ttyACM0", "/dev/ttyACM1", "/dev/ttyUSB1", "/dev/ttyUSB0", "/dev/ttyUSB2", "/dev/ttyUSB3"]:
             if os.path.exists(port):
                 try:
-                    s = serial.Serial(port, 115200, timeout=0.5)
-                    time.sleep(2.0)  # Wait for Arduino bootloader to finish
+                    s = serial.Serial(port, 115200, timeout=1.0, exclusive=True)
+                    time.sleep(3.0)  # Wait for Arduino bootloader to finish
                     
                     # Read boot messages to verify this is actually our Arduino!
                     boot_msg = s.read(1000).decode('utf-8', errors='ignore')
