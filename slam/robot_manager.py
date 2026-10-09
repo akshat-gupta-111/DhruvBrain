@@ -491,6 +491,7 @@ class RobotManagerNode(Node):
         self.tf_listener = TransformListener(self.tf_buffer, self)
         self.checkpoints = {}
         self.nav_client = ActionClient(self, NavigateToPose, 'navigate_to_pose')
+        self._last_eta_log = 0.0
 
     def send_nav_goal(self, pt, checkpoint_name):
         _log(f"[NAV] Waiting for NavigateToPose action server...")
@@ -515,7 +516,12 @@ class RobotManagerNode(Node):
 
     def _nav_feedback_cb(self, feedback_msg):
         eta = feedback_msg.feedback.estimated_time_remaining
-        _log(f"[NAV] ETA: {eta.sec + eta.nanosec*1e-9:.1f}s")
+        eta_sec = eta.sec + eta.nanosec * 1e-9
+        
+        now = time.time()
+        if now - self._last_eta_log > 2.0:
+            _log(f"[NAV] ETA: {eta_sec:.1f}s")
+            self._last_eta_log = now
 
     def _nav_goal_response_cb(self, future):
         goal_handle = future.result()
