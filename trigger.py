@@ -159,37 +159,40 @@ def update_env_file(ngrok_url: str):
 
 def fetch_active_ngrok_url(timeout_seconds: int = 60) -> Optional[str]:
     """
-    Connects to Kaggle log stream to automatically extract the live Ngrok tunnel URL.
+    Connects to Kaggle log stream / CLI logs to automatically extract the live Ngrok tunnel URL.
     """
-    try:
-        try:
-            import kaggle
-        except ImportError:
-            print("[!] ERROR: The 'kaggle' python package is not installed.")
-            print("[!] Please run: pip install kaggle")
-            return None
-            
-        os.environ["KAGGLE_CONFIG_DIR"] = str(BASE_DIR)
-        kaggle.api.authenticate()
+    kaggle_bin = get_kaggle_cmd()
+    print("[*] Scanning Kaggle execution stream for active Ngrok tunnel...")
+    start_time = time.time()
 
-        print("[*] Scanning Kaggle execution stream for active Ngrok tunnel...")
-        start_time = time.time()
-
-        for event in kaggle.api.kernels_logs_stream(KERNEL_ID):
-            if time.time() - start_time > timeout_seconds:
-                print("[!] Log scanning timeout reached.")
-                break
-
-            text = event.get("data", "")
-            match = re.search(r"https://[a-zA-Z0-9\-]+\.ngrok[a-zA-Z0-9\.\-]+", text)
+    # Strategy 1: Poll kaggle CLI 'kernels logs' (modern supported method)
+    while time.time() - start_time < timeout_seconds:
+        logs_output = run_command(f'"{kaggle_bin}" kernels logs {KERNEL_ID}')
+        if logs_output:
+            match = re.search(r"https://[a-zA-Z0-9\-]+\.ngrok[a-zA-Z0-9\.\-]+", logs_output)
             if match:
                 url = match.group(0).rstrip("/.")
                 return url
+        time.sleep(5)
 
-            if "SERVER ALIVE" in text:
-                break
+    # Strategy 2: Fallback to Python Kaggle API if available
+    try:
+        import kaggle
+        os.environ["KAGGLE_CONFIG_DIR"] = str(BASE_DIR)
+        kaggle.api.authenticate()
+
+        # Check if legacy kernels_logs_stream exists
+        if hasattr(kaggle.api, "kernels_logs_stream"):
+            for event in kaggle.api.kernels_logs_stream(KERNEL_ID):
+                text = event.get("data", "")
+                match = re.search(r"https://[a-zA-Z0-9\-]+\.ngrok[a-zA-Z0-9\.\-]+", text)
+                if match:
+                    return match.group(0).rstrip("/.")
+                if "SERVER ALIVE" in text:
+                    break
     except Exception as e:
-        print(f"[!] Log Stream Notice: {e}")
+        print(f"[!] Kaggle API Fallback Notice: {e}")
+
     return None
 
 
