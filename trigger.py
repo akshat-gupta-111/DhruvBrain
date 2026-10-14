@@ -25,7 +25,7 @@ if hasattr(sys.stdout, "reconfigure"):
         pass
 
 BASE_DIR = Path(__file__).parent.resolve()
-KERNEL_ID = "anmolsharma4521/local-automation-test"
+KERNEL_ID = "anmolsharma1117/local-automation-test"
 SCRIPT_FILE = BASE_DIR / "llava.py"
 NOTEBOOK_FILE = BASE_DIR / "automated_run.ipynb"
 ENV_FILE = BASE_DIR / ".env"
