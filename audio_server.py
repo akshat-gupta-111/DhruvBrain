@@ -136,10 +136,18 @@ def _do_stt(mono_audio: np.ndarray):
 # ── TTS ───────────────────────────────────────────────────────────────
 
 def _do_speak(text: str):
-    """Stream edge-tts → mpv stdin. Blocks until playback complete."""
-    loop = asyncio.new_event_loop()
-    loop.run_until_complete(_stream_to_mpv(text))
-    loop.close()
+    """Stream edge-tts → mpv stdin. Blocks until playback complete. Falls back safely if TTS fails."""
+    try:
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(_stream_to_mpv(text))
+        loop.close()
+    except Exception as e:
+        print(f"[Audio Server] TTS playback error: {e}")
+        # Local espeak fallback so the robot can still speak even if edge-tts is down
+        try:
+            subprocess.run(["espeak", text], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
 
 
 async def _stream_to_mpv(text: str):
@@ -165,13 +173,14 @@ async def _stream_to_mpv(text: str):
         pass
     except Exception as e:
         print(f"[Audio Server] edge-tts exception: {e}")
+        raise
     finally:
         try:
             proc.stdin.close()
         except Exception:
             pass
     proc.wait()
-    # Fallback: retry without explicit device
+    # Fallback: retry without explicit device if device failed
     if proc.returncode != 0:
         proc2 = subprocess.Popen(
             ["mpv", "--no-terminal", "--demuxer=lavf", "--demuxer-lavf-format=mp3", "-"],
@@ -184,6 +193,9 @@ async def _stream_to_mpv(text: str):
                     proc2.stdin.write(chunk["data"])
         except BrokenPipeError:
             pass
+        except Exception as e:
+            print(f"[Audio Server] edge-tts retry exception: {e}")
+            raise
         finally:
             try:
                 proc2.stdin.close()
