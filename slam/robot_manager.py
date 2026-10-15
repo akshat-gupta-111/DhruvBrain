@@ -494,12 +494,13 @@ class RobotManagerNode(Node):
         self._last_eta_log = 0.0
 
     def send_nav_goal(self, pt, checkpoint_name):
-        _log(f"[NAV] Waiting for NavigateToPose action server...")
-        if not self.nav_client.wait_for_server(timeout_sec=3.0):
-            _log("[ERROR] Nav2 Action Server not available. Is Nav2 running?")
+        _log(f"[NAV] Waiting for NavigateToPose action server (up to 15s)...")
+        if not self.nav_client.wait_for_server(timeout_sec=15.0):
+            _log("[ERROR] Nav2 Action Server not available after 15s. Is Nav2 still starting up?")
+            _log("[DEBUG] Check: sudo docker compose logs slam | grep -i nav2")
             return
             
-        _log(f"[NAV] Sending goal for '{checkpoint_name}'...")
+        _log(f"[NAV] Sending goal to checkpoint '{checkpoint_name}' at ({pt['x']:.2f}, {pt['y']:.2f})")
         goal = NavigateToPose.Goal()
         goal.pose.header.frame_id = 'map'
         goal.pose.header.stamp = self.get_clock().now().to_msg()
@@ -526,15 +527,20 @@ class RobotManagerNode(Node):
     def _nav_goal_response_cb(self, future):
         goal_handle = future.result()
         if not goal_handle.accepted:
-            _log("[NAV] Goal rejected by Nav2 server!")
+            _log("[NAV] Goal REJECTED by Nav2! Likely causes:")
+            _log("[NAV]   1) No map→odom TF (SLAM Toolbox not publishing TF?)")
+            _log("[NAV]   2) Robot pose unknown (AMCL not running for saved maps)")
+            _log("[NAV]   3) Nav2 costmap not initialised yet — wait 10s and retry")
+            _log("[DEBUG] Run inside container: ros2 run tf2_tools view_frames")
             return
-        _log("[NAV] Goal accepted, calculating path...")
+        _log("[NAV] Goal ACCEPTED — Nav2 is calculating path and moving robot...")
         self._get_result_future = goal_handle.get_result_async()
         self._get_result_future.add_done_callback(self._nav_result_cb)
 
     def _nav_result_cb(self, future):
         result = future.result().status
-        _log(f"[NAV] Navigation completed with status code: {result} (4=SUCCEEDED)")
+        status_str = {4: 'SUCCEEDED ✅', 5: 'CANCELED', 6: 'ABORTED ❌'}.get(result, f'UNKNOWN ({result})')
+        _log(f"[NAV] Navigation finished — status: {status_str}")
 
     def map_callback(self, msg: OccupancyGrid):
         global latest_map_img_bytes, map_received_count

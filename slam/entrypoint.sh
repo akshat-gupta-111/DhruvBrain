@@ -131,11 +131,15 @@ sleep 2
 # STEP 6 — Nav2 Navigation Stack (Planner, Controller, BT Navigator)
 # -----------------------------------------------------------------------------
 echo "[6/6] Starting Nav2 Navigation Stack..."
-ros2 launch nav2_bringup navigation_launch.py use_sim_time:=false >/tmp/nav2.log 2>&1 &
+# IMPORTANT: slam:=true tells Nav2 to use SLAM Toolbox's map→odom TF
+# for localization instead of requiring a separate AMCL node.
+# Without this flag Nav2 has no robot pose estimate and REJECTS every
+# NavigateToPose goal (Goal REJECTED by Nav2 server).
+ros2 launch nav2_bringup navigation_launch.py use_sim_time:=false slam:=true >/tmp/nav2.log 2>&1 &
 NAV2_PID=$!
 
-echo "      Allowing Nav2 10 s to initialise action servers..."
-sleep 10
+echo "      Allowing Nav2 15 s to initialise action servers..."
+sleep 15
 
 # -----------------------------------------------------------------------------
 # Ready — hand over to the interactive Robot Manager

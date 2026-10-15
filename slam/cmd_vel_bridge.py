@@ -57,24 +57,32 @@ class CmdVelBridge(Node):
         self.last_msg_time = time.time()
         x = msg.linear.x
         z = msg.angular.z
-        
+
         cmd = "<STOP>\n"
-        
-        # Give priority to turning if Nav2 wants to spin (z is much larger than x)
-        if abs(z) > abs(x) * 2.0 and abs(z) > 0.02:
-            if z > 0:
-                cmd = "<PIVOT_L,150,200>\n"
-            else:
-                cmd = "<PIVOT_R,150,200>\n"
-        else:
-            if x > 0.01:
-                cmd = "<FWD,150,200>\n"
-            elif x < -0.01:
-                cmd = "<REV,150,200>\n"
-            
+
+        # Proportional speed scaling: map Nav2's velocity magnitudes to Arduino PWM range.
+        # Nav2 typically sends x in [−0.5, 0.5] m/s and z in [−1.0, 1.0] rad/s.
+        # We scale these to PWM [80, 200] so the robot doesn't lurch or stall.
+        MAX_X   = 0.5   # m/s  — Nav2 max linear speed (tune via nav2 params)
+        MAX_Z   = 1.0   # rad/s — Nav2 max angular speed
+        MIN_PWM = 80    # minimum PWM that actually moves the robot
+        MAX_PWM = 180   # keep well below SPEED_LIMIT=180 for safety
+
+        fwd_pwm  = int(MIN_PWM + (min(abs(x), MAX_X) / MAX_X) * (MAX_PWM - MIN_PWM))
+        turn_pwm = int(MIN_PWM + (min(abs(z), MAX_Z) / MAX_Z) * (MAX_PWM - MIN_PWM))
+
+        # Decision: prioritise turning when angular component dominates
+        if abs(z) > abs(x) * 1.5 and abs(z) > 0.05:
+            # Pure pivot with proportional speed
+            cmd = f"<PIVOT_L,{turn_pwm},200>\n" if z > 0 else f"<PIVOT_R,{turn_pwm},200>\n"
+        elif abs(x) > 0.02:
+            # Translate forward/backward with proportional speed
+            cmd = f"<FWD,{fwd_pwm},200>\n" if x > 0 else f"<REV,{fwd_pwm},200>\n"
+        # else: x and z both near-zero → STOP (already set above)
+
         # Log every half second so we can see what Nav2 is doing without flooding
         if time.time() - getattr(self, '_last_print', 0) > 0.5:
-            self.get_logger().info(f"Nav2 sending cmd_vel -> x: {x:.2f}, z: {z:.2f} | Sending to Arduino: {cmd.strip()}")
+            self.get_logger().info(f"Nav2 cmd_vel x:{x:.2f} z:{z:.2f} → {cmd.strip()}")
             self._last_print = time.time()
             
         now = time.time()
