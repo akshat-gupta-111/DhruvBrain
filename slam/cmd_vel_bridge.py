@@ -9,9 +9,9 @@ import os
 class CmdVelBridge(Node):
     def __init__(self):
         super().__init__('cmd_vel_bridge')
+        # Listen to both /cmd_vel (from velocity smoother) and /cmd_vel_nav (direct from controller_server)
         self.subscription = self.create_subscription(Twist, '/cmd_vel', self.vel_callback, 10)
-        # Connect to Arduino (only ACM ports to protect LiDAR)
-        # Connect to Arduino (only ACM ports to protect LiDAR)
+        self.sub_nav = self.create_subscription(Twist, '/cmd_vel_nav', self.vel_callback, 10)
         self.serial = None
         # Scan potential Arduino ports: ACM ports first, then USB1/USB2.
         # NEVER scan /dev/ttyUSB0 — that is reserved for RPLidar A1.
