@@ -13,7 +13,10 @@ class CmdVelBridge(Node):
         # Connect to Arduino (only ACM ports to protect LiDAR)
         # Connect to Arduino (only ACM ports to protect LiDAR)
         self.serial = None
-        for port in ["/dev/ttyACM0", "/dev/ttyACM1", "/dev/ttyACM2", "/dev/ttyUSB0", "/dev/ttyUSB1"]:
+        # ONLY scan ACM ports for the Arduino — /dev/ttyUSB* are LiDAR ports.
+        # Opening ttyUSB0 and sending serial data stops the RPLidar motor,
+        # which kills /scan → kills RF2O odom → breaks the entire TF chain.
+        for port in ["/dev/ttyACM0", "/dev/ttyACM1", "/dev/ttyACM2"]:
             if os.path.exists(port):
                 try:
                     s = serial.Serial(port, 115200, timeout=1.0, write_timeout=1.0)
