@@ -49,7 +49,25 @@ sleep 2
 # STEP 2 — RPLidar A1  (must be first — everything subscribes to /scan)
 # -----------------------------------------------------------------------------
 echo "[2/6] Starting RPLidar A1 node..."
-ros2 launch rplidar_ros rplidar_a1_launch.py >/dev/null 2>&1 &
+
+# Auto-detect RPLidar serial port:
+# Check by-id first (persistent across replugging), then fallback to ttyUSB*
+LIDAR_PORT=""
+if [ -d "/dev/serial/by-id" ]; then
+    LIDAR_PORT=$(ls /dev/serial/by-id/*Silicon_Labs* /dev/serial/by-id/*CP210* 2>/dev/null | head -n 1 || true)
+fi
+if [ -z "$LIDAR_PORT" ]; then
+    for p in /dev/ttyUSB0 /dev/ttyUSB1 /dev/ttyUSB2; do
+        if [ -e "$p" ]; then
+            LIDAR_PORT="$p"
+            break
+        fi
+    done
+fi
+LIDAR_PORT=${LIDAR_PORT:-"/dev/ttyUSB0"}
+
+echo "      Using LiDAR port: $LIDAR_PORT"
+ros2 launch rplidar_ros rplidar_a1_launch.py serial_port:="$LIDAR_PORT" >/tmp/lidar.log 2>&1 &
 LIDAR_PID=$!
 
 # /scan is the only HARD dependency — no LiDAR means nothing works.
@@ -62,7 +80,10 @@ until ros2 topic list 2>/dev/null | grep -q "^/scan$"; do
     if [ "$WAITED" -ge "$MAX_WAIT" ]; then
         echo ""
         echo "[ERROR] /scan did not appear after ${MAX_WAIT}s."
-        echo "        Is the RPLidar plugged in? Check: ls /dev/ttyUSB*"
+        echo "        LiDAR Log (/tmp/lidar.log):"
+        tail -n 10 /tmp/lidar.log 2>/dev/null || echo "No log available."
+        echo "        Available USB serial devices:"
+        ls -l /dev/ttyUSB* /dev/ttyACM* 2>/dev/null || echo "None found."
         echo "        Container will keep running so you can debug."
         break
     fi

@@ -62,7 +62,7 @@ if [ -n "$BRIDGE_PID" ]; then
 else
     echo "cmd_vel_bridge is NOT running. Testing direct serial access..."
     ARDUINO_PORT=""
-    for p in /dev/ttyACM0 /dev/ttyACM1 /dev/ttyACM2 /dev/ttyUSB1 /dev/ttyUSB2; do
+    for p in /dev/ttyACM0 /dev/ttyACM1 /dev/ttyACM2; do
         if [ -e "$p" ]; then
             ARDUINO_PORT="$p"
             break

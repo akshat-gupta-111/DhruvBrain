@@ -12,10 +12,10 @@ class CmdVelBridge(Node):
         # Listen to both /cmd_vel (from velocity smoother) and /cmd_vel_nav (direct from controller_server)
         self.subscription = self.create_subscription(Twist, '/cmd_vel', self.vel_callback, 10)
         self.sub_nav = self.create_subscription(Twist, '/cmd_vel_nav', self.vel_callback, 10)
-        self.serial = None
-        # Scan potential Arduino ports: ACM ports first, then USB1/USB2.
-        # NEVER scan /dev/ttyUSB0 — that is reserved for RPLidar A1.
-        candidate_ports = ["/dev/ttyACM0", "/dev/ttyACM1", "/dev/ttyACM2", "/dev/ttyUSB1", "/dev/ttyUSB2"]
+        # ONLY scan ACM ports for the Arduino — NEVER touch ANY /dev/ttyUSB* device!
+        # RPLidar A1 is on /dev/ttyUSB*. Sending ASCII data to a ttyUSB port crashes
+        # the RPLidar firmware and halts the laser motor.
+        candidate_ports = ["/dev/ttyACM0", "/dev/ttyACM1", "/dev/ttyACM2"]
         for port in candidate_ports:
             if os.path.exists(port):
                 try:
