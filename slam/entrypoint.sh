@@ -72,8 +72,25 @@ LIDAR_PORT=${LIDAR_PORT:-"/dev/ttyUSB0"}
 chmod 666 "$LIDAR_PORT" 2>/dev/null || true
 chmod 666 /dev/ttyACM* 2>/dev/null || true
 
-echo "      Using LiDAR port: $LIDAR_PORT"
-ros2 launch rplidar_ros rplidar_a1_launch.py serial_port:="$LIDAR_PORT" serial_baudrate:=115200 >/tmp/lidar.log 2>&1 &
+# Send Slamtec STOP byte (0xA5 0x25) and flush buffer so RPLidar resets cleanly
+python3 -c "
+import serial, time
+try:
+    s = serial.Serial('$LIDAR_PORT', 115200, timeout=0.5)
+    s.write(b'\xa5\x25')
+    s.flush()
+    time.sleep(0.3)
+    s.reset_input_buffer()
+    s.close()
+except:
+    pass
+" 2>/dev/null || true
+
+echo "      Using LiDAR port: $LIDAR_PORT (scan_mode: Standard)"
+ros2 launch rplidar_ros rplidar_a1_launch.py \
+    serial_port:="$LIDAR_PORT" \
+    serial_baudrate:=115200 \
+    scan_mode:=Standard >/tmp/lidar.log 2>&1 &
 LIDAR_PID=$!
 
 # /scan is the only HARD dependency — no LiDAR means nothing works.
