@@ -161,22 +161,17 @@ echo "============================================================"
 echo ""
 
 # -----------------------------------------------------------------------------
-# Wait for full TF chain: map → odom → base_link (up to 60 s)
-# Without this, the first checkpoint save or nav goal fires before SLAM
-# Toolbox has published the map→odom link, causing the 'unconnected trees' error.
+# Advisory TF check: log the scan frame_id so we can verify laser vs laser_frame.
+# This is non-blocking — robot_manager starts regardless.
 # -----------------------------------------------------------------------------
-echo "[WAIT] Waiting for TF chain: map → base_link (up to 60 s)..."
-TF_WAIT=0
-until ros2 run tf2_ros tf2_echo map base_link 2>/dev/null | grep -q 'Translation:'; do
-    sleep 2
-    TF_WAIT=$((TF_WAIT + 2))
-    if [ "$TF_WAIT" -ge 60 ]; then
-        echo "[WARNING] map→base_link TF not seen after 60s — starting anyway."
-        echo "          Drive the robot a little so RF2O can compute first odometry."
-        break
-    fi
-done
-[ "$TF_WAIT" -lt 60 ] && echo "[OK] TF chain map→base_link is live."
+echo "[INFO] Checking /scan frame_id (non-blocking, 5s)..."
+SCAN_FRAME=$(timeout 5 ros2 topic echo /scan --once 2>/dev/null | grep 'frame_id' | head -1 | tr -d " '")
+if [ -n "$SCAN_FRAME" ]; then
+    echo "[INFO] /scan is publishing with: $SCAN_FRAME"
+else
+    echo "[INFO] Could not read /scan frame_id yet — check: ros2 topic echo /scan --once"
+fi
+echo "[INFO] Starting robot_manager (TF will resolve once robot moves)..."
 
 # exec replaces the shell with Python so signals are forwarded correctly
 if [ -f /workspace/src_live/robot_manager.py ]; then
