@@ -587,8 +587,10 @@ class RobotManagerNode(Node):
 
     def record_checkpoint(self, name):
         try:
-            now = self.get_clock().now()
-            t = self.tf_buffer.lookup_transform('map', 'base_link', now, rclpy.duration.Duration(seconds=1.5))
+            # Use Time(0) = "latest available" transform instead of clock.now().
+            # clock.now() requires the TF to exist at that exact timestamp, which
+            # fails whenever there is any pipeline lag. Time(0) is always robust.
+            t = self.tf_buffer.lookup_transform('map', 'base_link', rclpy.time.Time())
             p = t.transform.translation
             q = t.transform.rotation
             self.checkpoints[name] = {'x': p.x, 'y': p.y, 'z': p.z,
@@ -596,6 +598,7 @@ class RobotManagerNode(Node):
             _log(f"[SUCCESS] Checkpoint '{name}' pinned at ({p.x:.2f}, {p.y:.2f})")
         except Exception as e:
             _log(f"[ERROR] Could not record checkpoint: {e}")
+            _log("[HINT] TF error? Drive the robot a little so RF2O builds odom->base_link first.")
 
     def save_map_and_metadata(self, room_name):
         _log(f"[SAVE] Saving map '{room_name}'...")

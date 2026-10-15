@@ -36,8 +36,10 @@ trap cleanup EXIT INT TERM
 # -----------------------------------------------------------------------------
 echo "[1/4] Publishing static TF frames..."
 
-# base_link → laser  (LiDAR mounted 1.6 m above robot centre)
-ros2 run tf2_ros static_transform_publisher 0 0 1.6 0 0 0 base_link laser >/dev/null 2>&1 &
+# base_link → laser_frame  (RPLidar A1 default frame_id is 'laser_frame', NOT 'laser')
+# This MUST match the frame_id RPLidar publishes in /scan, otherwise the whole
+# TF chain breaks: map → odom → base_link → laser_frame
+ros2 run tf2_ros static_transform_publisher 0 0 1.6 0 0 0 base_link laser_frame >/dev/null 2>&1 &
 TF_LASER_PID=$!
 
 # base_link → base_footprint  (prevents "Failed to compute odom pose" in SLAM)
@@ -59,7 +61,9 @@ if [ -n "$ACTUAL_PORT" ] && [ "$ACTUAL_PORT" != "/dev/ttyUSB0" ]; then
     ln -sf "$ACTUAL_PORT" /dev/ttyUSB0
 fi
 
-ros2 launch rplidar_ros rplidar_a1_launch.py >/tmp/lidar.log 2>&1 &
+# Explicitly set frame_id=laser_frame so it matches the static TF above.
+# (RPLidar default is laser_frame, but we make it explicit to be safe.)
+ros2 launch rplidar_ros rplidar_a1_launch.py frame_id:=laser_frame >/tmp/lidar.log 2>&1 &
 LIDAR_PID=$!
 
 # /scan is the only HARD dependency — no LiDAR means nothing works.
@@ -155,6 +159,24 @@ echo "    RF2O log:  tail -f /tmp/rf2o.log"
 echo "    SLAM log:  tail -f /tmp/slam.log"
 echo "============================================================"
 echo ""
+
+# -----------------------------------------------------------------------------
+# Wait for full TF chain: map → odom → base_link (up to 60 s)
+# Without this, the first checkpoint save or nav goal fires before SLAM
+# Toolbox has published the map→odom link, causing the 'unconnected trees' error.
+# -----------------------------------------------------------------------------
+echo "[WAIT] Waiting for TF chain: map → base_link (up to 60 s)..."
+TF_WAIT=0
+until ros2 run tf2_ros tf2_echo map base_link 2>/dev/null | grep -q 'Translation:'; do
+    sleep 2
+    TF_WAIT=$((TF_WAIT + 2))
+    if [ "$TF_WAIT" -ge 60 ]; then
+        echo "[WARNING] map→base_link TF not seen after 60s — starting anyway."
+        echo "          Drive the robot a little so RF2O can compute first odometry."
+        break
+    fi
+done
+[ "$TF_WAIT" -lt 60 ] && echo "[OK] TF chain map→base_link is live."
 
 # exec replaces the shell with Python so signals are forwarded correctly
 if [ -f /workspace/src_live/robot_manager.py ]; then
