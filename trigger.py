@@ -25,7 +25,7 @@ if hasattr(sys.stdout, "reconfigure"):
         pass
 
 BASE_DIR = Path(__file__).parent.resolve()
-KERNEL_ID = "akshatgupta2006/local-automation-test"
+KERNEL_ID = "anmolsharma1117/local-automation-test"
 SCRIPT_FILE = BASE_DIR / "llava.py"
 NOTEBOOK_FILE = BASE_DIR / "automated_run.ipynb"
 ENV_FILE = BASE_DIR / ".env"
@@ -157,39 +157,79 @@ def update_env_file(ngrok_url: str):
     print(f"[+] Updated {ENV_FILE.name} with NGROK_BASE_URL={ngrok_url}")
 
 
+def get_existing_env_url() -> Optional[str]:
+    """Reads NGROK_BASE_URL from .env if present and tests if it is responsive."""
+    if not ENV_FILE.exists():
+        return None
+    with open(ENV_FILE, "r", encoding="utf-8") as f:
+        for line in f:
+            if line.startswith("NGROK_BASE_URL="):
+                url = line.split("=", 1)[1].strip()
+                if url:
+                    return url
+    return None
+
+
 def fetch_active_ngrok_url(timeout_seconds: int = 60) -> Optional[str]:
     """
-    Connects to Kaggle log stream to automatically extract the live Ngrok tunnel URL.
+    Connects to Kaggle / Ngrok API to automatically extract the live Ngrok tunnel URL.
     """
-    try:
+    # Strategy 1: Check ngrok cloud API directly using the authtoken in llava.py / env
+    ngrok_token = os.environ.get("NGROK_AUTHTOKEN", "34GP1f4njzBBTVHJNNhVcXrsuLn_7WBATL6TtWZFhhCWnCuut")
+    if ngrok_token:
         try:
-            import kaggle
-        except ImportError:
-            print("[!] ERROR: The 'kaggle' python package is not installed.")
-            print("[!] Please run: pip install kaggle")
-            return None
-            
-        os.environ["KAGGLE_CONFIG_DIR"] = str(BASE_DIR)
-        kaggle.api.authenticate()
+            import urllib.request
+            req = urllib.request.Request(
+                "https://api.ngrok.com/tunnels",
+                headers={
+                    "Authorization": f"Bearer {ngrok_token}",
+                    "Ngrok-Version": "2"
+                }
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                tunnels = data.get("tunnels", [])
+                if tunnels:
+                    url = tunnels[0].get("public_url", "")
+                    if url:
+                        print(f"[+] Found active tunnel via Ngrok API: {url}")
+                        return url.rstrip("/.")
+        except Exception:
+            pass
 
-        print("[*] Scanning Kaggle execution stream for active Ngrok tunnel...")
-        start_time = time.time()
+    # Strategy 2: If we already have a working URL in .env, check if it's alive
+    existing_url = get_existing_env_url()
+    if existing_url:
+        try:
+            import urllib.request
+            req = urllib.request.Request(
+                f"{existing_url}/api/tags",
+                headers={"ngrok-skip-browser-warning": "true"}
+            )
+            with urllib.request.urlopen(req, timeout=4) as resp:
+                if resp.status == 200:
+                    print(f"[+] Reusing confirmed alive endpoint from .env: {existing_url}")
+                    return existing_url
+        except Exception:
+            pass
 
-        for event in kaggle.api.kernels_logs_stream(KERNEL_ID):
-            if time.time() - start_time > timeout_seconds:
-                print("[!] Log scanning timeout reached.")
-                break
+    # Strategy 3: Check CLI logs if available on newer kaggle versions
+    kaggle_bin = get_kaggle_cmd()
+    print("[*] Scanning Kaggle execution stream for active Ngrok tunnel...")
+    start_time = time.time()
 
-            text = event.get("data", "")
-            match = re.search(r"https://[a-zA-Z0-9\-]+\.ngrok[a-zA-Z0-9\.\-]+", text)
+    while time.time() - start_time < min(timeout_seconds, 20):
+        logs_output = run_command(f'"{kaggle_bin}" kernels logs {KERNEL_ID}')
+        if logs_output and "invalid choice: 'logs'" not in logs_output:
+            match = re.search(r"https://[a-zA-Z0-9\-]+\.ngrok[a-zA-Z0-9\.\-]+", logs_output)
             if match:
                 url = match.group(0).rstrip("/.")
                 return url
+        else:
+            # Older Kaggle CLI doesn't support 'logs' command
+            break
+        time.sleep(5)
 
-            if "SERVER ALIVE" in text:
-                break
-    except Exception as e:
-        print(f"[!] Log Stream Notice: {e}")
     return None
 
 
@@ -234,8 +274,8 @@ def trigger_and_get_url(timeout_seconds: int = 120) -> Optional[str]:
             return None
         print(f"[+] Kernel pushed: {push_output}")
 
-    # 2. Extract Ngrok URL from log stream
-    print("[*] Resolving active Ngrok endpoint from Kaggle logs...")
+    # 2. Extract Ngrok URL
+    print("[*] Resolving active Ngrok endpoint...")
     url = fetch_active_ngrok_url(timeout_seconds=timeout_seconds)
 
     if url:
@@ -243,8 +283,13 @@ def trigger_and_get_url(timeout_seconds: int = 120) -> Optional[str]:
         update_env_file(url)
         return url
     else:
+        # Check if existing URL in .env is present as fallback
+        fallback = get_existing_env_url()
+        if fallback:
+            print(f"[+] Using existing NGROK_BASE_URL from .env: {fallback}")
+            return fallback
+
         print("[!] Could not automatically detect Ngrok URL from Kaggle stream.")
-        print("    If the server was just launched, it may need ~45s to install packages and start the tunnel.")
         return None
 
 
