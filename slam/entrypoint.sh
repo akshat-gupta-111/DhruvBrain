@@ -24,7 +24,6 @@ echo ""
 cleanup() {
     echo ""
     echo "[SHUTDOWN] Stopping all SLAM nodes..."
-    # Kill by PID if we have them, fall back to killall for safety
     kill "$SLAM_PID" "$RF2O_PID" "$LIDAR_PID" "$TF_LASER_PID" "$TF_FOOTPRINT_PID" "$BRIDGE_PID" "$NAV2_PID" 2>/dev/null || true
     wait 2>/dev/null || true
     echo "[SHUTDOWN] All nodes stopped. Goodbye."
@@ -34,7 +33,7 @@ trap cleanup EXIT INT TERM
 # -----------------------------------------------------------------------------
 # STEP 1 — Static TF Publishers (no dependencies)
 # -----------------------------------------------------------------------------
-echo "[1/4] Publishing static TF frames..."
+echo "[1/6] Publishing static TF frames..."
 
 # base_link → laser  (LiDAR mounted 1.6 m above robot centre)
 ros2 run tf2_ros static_transform_publisher 0 0 1.6 0 0 0 base_link laser >/dev/null 2>&1 &
@@ -49,56 +48,15 @@ sleep 2
 # -----------------------------------------------------------------------------
 # STEP 2 — RPLidar A1  (must be first — everything subscribes to /scan)
 # -----------------------------------------------------------------------------
-echo "[2/4] Starting RPLidar A1 node..."
-
-# Fix port enumeration: if replugging caused the LiDAR to become ttyUSB1/2,
-# symlink it back to ttyUSB0 so the rplidar node can always find it.
-ACTUAL_PORT=$(ls /dev/ttyUSB* 2>/dev/null | head -n 1)
-if [ -n "$ACTUAL_PORT" ] && [ "$ACTUAL_PORT" != "/dev/ttyUSB0" ]; then
-    echo "      Found LiDAR on $ACTUAL_PORT (symlinking to /dev/ttyUSB0)"
-    ln -sf "$ACTUAL_PORT" /dev/ttyUSB0
-fi
-
-# RPLidar A1: assert DTR on the serial port BEFORE launching the node.
-# DTR is the hardware signal that powers the A1 spinning motor.
-# Without this, a motor left stopped from a previous session causes
-# OPERATION_TIMEOUT and the node crashes immediately.
-if [ -e /dev/ttyUSB0 ]; then
-    stty -F /dev/ttyUSB0 dtr 2>/dev/null || true
-    echo "      DTR asserted on /dev/ttyUSB0 (motor start signal sent)."
-    sleep 1
-fi
-
-# Launch rplidar with frame_id=laser and retry up to 3 times if OPERATION_TIMEOUT.
-LIDAR_RETRIES=0
-while [ $LIDAR_RETRIES -lt 3 ]; do
-    ros2 launch rplidar_ros rplidar_a1_launch.py \
-        serial_port:=/dev/ttyUSB0 \
-        frame_id:=laser >/tmp/lidar.log 2>&1 &
-    LIDAR_PID=$!
-    sleep 4
-    # If the node already exited (crashed), retry
-    if ! kill -0 $LIDAR_PID 2>/dev/null; then
-        LIDAR_RETRIES=$((LIDAR_RETRIES + 1))
-        echo "      [RETRY $LIDAR_RETRIES/3] rplidar node crashed (OPERATION_TIMEOUT). Asserting DTR and retrying..."
-        stty -F /dev/ttyUSB0 dtr 2>/dev/null || true
-        sleep 2
-    else
-        break
-    fi
-done
-if [ $LIDAR_RETRIES -ge 3 ]; then
-    echo "[ERROR] rplidar_node failed 3 times. Check: cat /tmp/lidar.log"
-fi
+echo "[2/6] Starting RPLidar A1 node..."
+ros2 launch rplidar_ros rplidar_a1_launch.py >/dev/null 2>&1 &
+LIDAR_PID=$!
 
 # /scan is the only HARD dependency — no LiDAR means nothing works.
 echo "      Waiting for /scan topic (up to 30 s)..."
 MAX_WAIT=30
 WAITED=0
 until ros2 topic list 2>/dev/null | grep -q "^/scan$"; do
-    # Force the ROS node to start the physical motor (assert DTR)
-    ros2 service call /start_motor std_srvs/srv/Empty "{}" >/dev/null 2>&1 || true
-    
     sleep 1
     WAITED=$((WAITED + 1))
     if [ "$WAITED" -ge "$MAX_WAIT" ]; then
@@ -106,7 +64,6 @@ until ros2 topic list 2>/dev/null | grep -q "^/scan$"; do
         echo "[ERROR] /scan did not appear after ${MAX_WAIT}s."
         echo "        Is the RPLidar plugged in? Check: ls /dev/ttyUSB*"
         echo "        Container will keep running so you can debug."
-        # Drop straight into robot_manager — user can investigate
         break
     fi
 done
@@ -118,7 +75,7 @@ sleep 3
 # -----------------------------------------------------------------------------
 # STEP 3 — RF2O Laser Odometry  (/scan → /odom)
 # -----------------------------------------------------------------------------
-echo "[3/4] Starting RF2O odometry (/scan → /odom)..."
+echo "[3/6] Starting RF2O odometry (/scan → /odom)..."
 ros2 launch rf2o_laser_odometry rf2o_laser_odometry.launch.py \
     laser_scan_topic:=/scan \
     odom_topic:=/odom \
@@ -128,14 +85,13 @@ ros2 launch rf2o_laser_odometry rf2o_laser_odometry.launch.py \
 RF2O_PID=$!
 
 # RF2O needs a few seconds to read scan data and start publishing odom.
-# Fixed delay is more reliable than topic polling for this node.
 echo "      Allowing RF2O 8 s to initialise..."
 sleep 8
 
 # -----------------------------------------------------------------------------
 # STEP 4 — SLAM Toolbox  (needs /scan + /odom)
 # -----------------------------------------------------------------------------
-echo "[4/4] Starting SLAM Toolbox (online async)..."
+echo "[4/6] Starting SLAM Toolbox (online async)..."
 ros2 launch slam_toolbox online_async_launch.py use_sim_time:=false >/tmp/slam.log 2>&1 &
 SLAM_PID=$!
 
@@ -144,7 +100,7 @@ echo "      Allowing SLAM Toolbox 10 s to initialise..."
 sleep 10
 
 # -----------------------------------------------------------------------------
-# STEP 5 — ROS-Arduino Bridge (translates /cmd_vel to <FWD> strings)
+# STEP 5 — ROS-Arduino Bridge (translates /cmd_vel → <FWD> serial commands)
 # -----------------------------------------------------------------------------
 echo "[5/6] Starting ROS-Arduino Bridge..."
 if [ -f /workspace/src_live/cmd_vel_bridge.py ]; then
@@ -157,13 +113,12 @@ BRIDGE_PID=$!
 sleep 2
 
 # -----------------------------------------------------------------------------
-# STEP 6 — Nav2 Navigation Stack (Planner, Controller, BT Navigator)
+# STEP 6 — Nav2 Navigation Stack (needs /map + TF chain from SLAM Toolbox)
 # -----------------------------------------------------------------------------
 echo "[6/6] Starting Nav2 Navigation Stack..."
-# IMPORTANT: slam:=true tells Nav2 to use SLAM Toolbox's map→odom TF
-# for localization instead of requiring a separate AMCL node.
-# Without this flag Nav2 has no robot pose estimate and REJECTS every
-# NavigateToPose goal (Goal REJECTED by Nav2 server).
+# slam:=true tells Nav2 to use SLAM Toolbox's map→odom TF for localisation
+# instead of requiring a separate AMCL node. Without this flag Nav2 rejects
+# every NavigateToPose goal because it has no robot pose estimate.
 ros2 launch nav2_bringup navigation_launch.py use_sim_time:=false slam:=true >/tmp/nav2.log 2>&1 &
 NAV2_PID=$!
 
@@ -182,21 +137,9 @@ echo ""
 echo "  If /map never appears, check logs:"
 echo "    RF2O log:  tail -f /tmp/rf2o.log"
 echo "    SLAM log:  tail -f /tmp/slam.log"
+echo "    Nav2 log:  tail -f /tmp/nav2.log"
 echo "============================================================"
 echo ""
-
-# -----------------------------------------------------------------------------
-# Advisory TF check: log the scan frame_id so we can verify laser vs laser_frame.
-# This is non-blocking — robot_manager starts regardless.
-# -----------------------------------------------------------------------------
-echo "[INFO] Checking /scan frame_id (non-blocking, 5s)..."
-SCAN_FRAME=$(timeout 5 ros2 topic echo /scan --once 2>/dev/null | grep 'frame_id' | head -1 | tr -d " '")
-if [ -n "$SCAN_FRAME" ]; then
-    echo "[INFO] /scan is publishing with: $SCAN_FRAME"
-else
-    echo "[INFO] Could not read /scan frame_id yet — check: ros2 topic echo /scan --once"
-fi
-echo "[INFO] Starting robot_manager (TF will resolve once robot moves)..."
 
 # exec replaces the shell with Python so signals are forwarded correctly
 if [ -f /workspace/src_live/robot_manager.py ]; then
