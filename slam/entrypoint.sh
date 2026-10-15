@@ -51,23 +51,29 @@ sleep 2
 echo "[2/6] Starting RPLidar A1 node..."
 
 # Auto-detect RPLidar serial port:
-# Check by-id first (persistent across replugging), then fallback to ttyUSB*
+# MUST use canonical device path (/dev/ttyUSB0) — RPLidar C++ SDK times out with symlinks!
 LIDAR_PORT=""
-if [ -d "/dev/serial/by-id" ]; then
-    LIDAR_PORT=$(ls /dev/serial/by-id/*Silicon_Labs* /dev/serial/by-id/*CP210* 2>/dev/null | head -n 1 || true)
-fi
-if [ -z "$LIDAR_PORT" ]; then
-    for p in /dev/ttyUSB0 /dev/ttyUSB1 /dev/ttyUSB2; do
-        if [ -e "$p" ]; then
-            LIDAR_PORT="$p"
-            break
-        fi
-    done
+for p in /dev/ttyUSB0 /dev/ttyUSB1 /dev/ttyUSB2; do
+    if [ -e "$p" ]; then
+        LIDAR_PORT="$p"
+        break
+    fi
+done
+
+if [ -z "$LIDAR_PORT" ] && [ -d "/dev/serial/by-id" ]; then
+    BY_ID=$(ls /dev/serial/by-id/*Silicon_Labs* /dev/serial/by-id/*CP210* 2>/dev/null | head -n 1 || true)
+    if [ -n "$BY_ID" ]; then
+        LIDAR_PORT=$(realpath "$BY_ID" 2>/dev/null || readlink -f "$BY_ID" || echo "$BY_ID")
+    fi
 fi
 LIDAR_PORT=${LIDAR_PORT:-"/dev/ttyUSB0"}
 
+# Ensure device permissions inside container
+chmod 666 "$LIDAR_PORT" 2>/dev/null || true
+chmod 666 /dev/ttyACM* 2>/dev/null || true
+
 echo "      Using LiDAR port: $LIDAR_PORT"
-ros2 launch rplidar_ros rplidar_a1_launch.py serial_port:="$LIDAR_PORT" >/tmp/lidar.log 2>&1 &
+ros2 launch rplidar_ros rplidar_a1_launch.py serial_port:="$LIDAR_PORT" serial_baudrate:=115200 >/tmp/lidar.log 2>&1 &
 LIDAR_PID=$!
 
 # /scan is the only HARD dependency — no LiDAR means nothing works.
