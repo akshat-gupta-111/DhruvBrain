@@ -62,6 +62,8 @@ services:
       # Hot-reload: mount the slam/ source directory so edits to
       # robot_manager.py on the host are picked up without a rebuild.
       - ./:/workspace/src_live/
+      - ./nav2_params.yaml:/workspace/nav2_params.yaml
+      - ./entrypoint.sh:/workspace/entrypoint.sh
 
     # --- Port ------------------------------------------------------------
     # port 8000 is already exposed via network_mode: host, but this line

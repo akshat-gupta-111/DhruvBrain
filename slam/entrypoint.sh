@@ -119,7 +119,23 @@ echo "[6/6] Starting Nav2 Navigation Stack..."
 # slam:=true tells Nav2 to use SLAM Toolbox's map→odom TF for localisation
 # instead of requiring a separate AMCL node. Without this flag Nav2 rejects
 # every NavigateToPose goal because it has no robot pose estimate.
-ros2 launch nav2_bringup navigation_launch.py use_sim_time:=false slam:=true >/tmp/nav2.log 2>&1 &
+NAV2_PARAMS="/workspace/nav2_params.yaml"
+if [ -f /workspace/src_live/nav2_params.yaml ]; then
+    NAV2_PARAMS="/workspace/src_live/nav2_params.yaml"
+fi
+
+if [ -f "$NAV2_PARAMS" ]; then
+    echo "      Using custom Nav2 parameters: $NAV2_PARAMS"
+    ros2 launch nav2_bringup navigation_launch.py \
+        use_sim_time:=false \
+        slam:=true \
+        params_file:="$NAV2_PARAMS" >/tmp/nav2.log 2>&1 &
+else
+    echo "      [WARN] $NAV2_PARAMS not found, using default Nav2 parameters"
+    ros2 launch nav2_bringup navigation_launch.py \
+        use_sim_time:=false \
+        slam:=true >/tmp/nav2.log 2>&1 &
+fi
 NAV2_PID=$!
 
 echo "      Allowing Nav2 15 s to initialise action servers..."

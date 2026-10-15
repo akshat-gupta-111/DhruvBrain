@@ -13,14 +13,14 @@ class CmdVelBridge(Node):
         # Connect to Arduino (only ACM ports to protect LiDAR)
         # Connect to Arduino (only ACM ports to protect LiDAR)
         self.serial = None
-        # ONLY scan ACM ports for the Arduino — /dev/ttyUSB* are LiDAR ports.
-        # Opening ttyUSB0 and sending serial data stops the RPLidar motor,
-        # which kills /scan → kills RF2O odom → breaks the entire TF chain.
-        for port in ["/dev/ttyACM0", "/dev/ttyACM1", "/dev/ttyACM2"]:
+        # Scan potential Arduino ports: ACM ports first, then USB1/USB2.
+        # NEVER scan /dev/ttyUSB0 — that is reserved for RPLidar A1.
+        candidate_ports = ["/dev/ttyACM0", "/dev/ttyACM1", "/dev/ttyACM2", "/dev/ttyUSB1", "/dev/ttyUSB2"]
+        for port in candidate_ports:
             if os.path.exists(port):
                 try:
                     s = serial.Serial(port, 115200, timeout=1.0, write_timeout=1.0)
-                    time.sleep(2.0)  # Wait for boot
+                    time.sleep(2.0)  # Wait for Arduino bootloader/reset
                     s.reset_input_buffer()
                     s.reset_output_buffer()
                     
@@ -28,11 +28,12 @@ class CmdVelBridge(Node):
                     s.write(b"MODE?\n")
                     s.flush()
                     
-                    # Wait for a response (it should instantly say MODE:AUTO or MODE:MANUAL)
-                    response = s.read(100).decode('utf-8', errors='ignore')
-                    if "MODE:" in response or "CABLE" in response:
+                    # Read response (Arduino replies "ACK\n" then "STATUS: Mode=...")
+                    response = s.read(128).decode('utf-8', errors='ignore').strip()
+                    resp_upper = response.upper()
+                    if any(k in resp_upper for k in ["MODE", "STATUS", "ACK", "CABLE", "AUTONOMOUS", "MANUAL"]):
                         self.serial = s
-                        self.get_logger().info(f"[Bridge] jetson-slam connected to live arduino on {port}")
+                        self.get_logger().info(f"[Bridge] Connected to live Arduino on {port} (rx: {repr(response)})")
                         self.serial.write(b"MODE:AUTO\n")
                         self.serial.flush()
                         time.sleep(0.1)
@@ -43,7 +44,7 @@ class CmdVelBridge(Node):
                         self.serial.flush()
                         break
                     else:
-                        self.get_logger().warn(f"[Bridge] Port {port} is a zombie or unresponsive. Skipping.")
+                        self.get_logger().warn(f"[Bridge] Port {port} responded with unexpected data: {repr(response)}. Skipping.")
                         s.close()
                 except Exception as e:
                     self.get_logger().warn(f"[Bridge] Failed on {port}: {e}")
@@ -99,6 +100,10 @@ class CmdVelBridge(Node):
                 except Exception as e:
                     self.get_logger().error(f"Serial write failed! Did the Arduino brown-out and disconnect? {e}")
                     self.serial = None
+            else:
+                if now - getattr(self, '_last_no_serial_warn', 0) > 1.0:
+                    self.get_logger().error(f"[Bridge] CANNOT SEND {cmd.strip()}: Arduino serial port is NOT connected!")
+                    self._last_no_serial_warn = now
             self._last_cmd = cmd
             self._last_send_time = now
 
