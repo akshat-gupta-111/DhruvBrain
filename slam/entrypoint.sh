@@ -36,10 +36,8 @@ trap cleanup EXIT INT TERM
 # -----------------------------------------------------------------------------
 echo "[1/4] Publishing static TF frames..."
 
-# base_link → laser_frame  (RPLidar A1 default frame_id is 'laser_frame', NOT 'laser')
-# This MUST match the frame_id RPLidar publishes in /scan, otherwise the whole
-# TF chain breaks: map → odom → base_link → laser_frame
-ros2 run tf2_ros static_transform_publisher 0 0 1.6 0 0 0 base_link laser_frame >/dev/null 2>&1 &
+# base_link → laser  (LiDAR mounted 1.6 m above robot centre)
+ros2 run tf2_ros static_transform_publisher 0 0 1.6 0 0 0 base_link laser >/dev/null 2>&1 &
 TF_LASER_PID=$!
 
 # base_link → base_footprint  (prevents "Failed to compute odom pose" in SLAM)
@@ -61,10 +59,37 @@ if [ -n "$ACTUAL_PORT" ] && [ "$ACTUAL_PORT" != "/dev/ttyUSB0" ]; then
     ln -sf "$ACTUAL_PORT" /dev/ttyUSB0
 fi
 
-# Explicitly set frame_id=laser_frame so it matches the static TF above.
-# (RPLidar default is laser_frame, but we make it explicit to be safe.)
-ros2 launch rplidar_ros rplidar_a1_launch.py frame_id:=laser_frame >/tmp/lidar.log 2>&1 &
-LIDAR_PID=$!
+# RPLidar A1: assert DTR on the serial port BEFORE launching the node.
+# DTR is the hardware signal that powers the A1 spinning motor.
+# Without this, a motor left stopped from a previous session causes
+# OPERATION_TIMEOUT and the node crashes immediately.
+if [ -e /dev/ttyUSB0 ]; then
+    stty -F /dev/ttyUSB0 dtr 2>/dev/null || true
+    echo "      DTR asserted on /dev/ttyUSB0 (motor start signal sent)."
+    sleep 1
+fi
+
+# Launch rplidar with frame_id=laser and retry up to 3 times if OPERATION_TIMEOUT.
+LIDAR_RETRIES=0
+while [ $LIDAR_RETRIES -lt 3 ]; do
+    ros2 launch rplidar_ros rplidar_a1_launch.py \
+        serial_port:=/dev/ttyUSB0 \
+        frame_id:=laser >/tmp/lidar.log 2>&1 &
+    LIDAR_PID=$!
+    sleep 4
+    # If the node already exited (crashed), retry
+    if ! kill -0 $LIDAR_PID 2>/dev/null; then
+        LIDAR_RETRIES=$((LIDAR_RETRIES + 1))
+        echo "      [RETRY $LIDAR_RETRIES/3] rplidar node crashed (OPERATION_TIMEOUT). Asserting DTR and retrying..."
+        stty -F /dev/ttyUSB0 dtr 2>/dev/null || true
+        sleep 2
+    else
+        break
+    fi
+done
+if [ $LIDAR_RETRIES -ge 3 ]; then
+    echo "[ERROR] rplidar_node failed 3 times. Check: cat /tmp/lidar.log"
+fi
 
 # /scan is the only HARD dependency — no LiDAR means nothing works.
 echo "      Waiting for /scan topic (up to 30 s)..."
