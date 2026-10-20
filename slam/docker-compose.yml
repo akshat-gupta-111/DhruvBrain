@@ -64,6 +64,7 @@ services:
       - ./:/workspace/src_live/
       - ./nav2_params.yaml:/workspace/nav2_params.yaml
       - ./entrypoint.sh:/workspace/entrypoint.sh
+      - ./rf2o.launch.py:/workspace/rf2o.launch.py
 
     # --- Port ------------------------------------------------------------
     # port 8000 is already exposed via network_mode: host, but this line

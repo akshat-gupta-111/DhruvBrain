@@ -97,6 +97,11 @@ unsigned long defaultPivotDurationMs       = 1800; // Default sustained pivot: 1
 unsigned long minTimedDurationMs           = 2500; // Threshold: timed translations < 2500ms will be updated to default
 bool durationOverrideActive                = true; // Active duration safeguard
 
+// Continuous mode safety watchdog: if Jetson sends duration 0 and dies/hangs, auto-stop after 1500ms
+unsigned long lastSerialCmdTime            = 0;
+const unsigned long SERIAL_COMMS_TIMEOUT_MS = 1500;
+bool continuousActive                      = false;
+
 // ============================================================
 // STATUS LED / MOSFET (PIN 13) — JETSON MOOD CONTROLLER
 // ============================================================
@@ -301,6 +306,8 @@ void loop()
 
 void handleIncomingSerial(String line)
 {
+  lastSerialCmdTime = millis();
+
   // 1. Immediately send ACK confirmation back to Jetson over USB
   Serial.println("ACK");
 
@@ -596,6 +603,38 @@ void parseMotorPart(String str, String source)
   if (str.length() == 0)
     return;
 
+  // Check for MIX command: <MIX,vx,vy,w> or <MIX,vx,vy,w,duration>
+  if (str.startsWith("MIX,") || str.startsWith("mix,"))
+  {
+    String rest = str.substring(4);
+    int p1 = rest.indexOf(',');
+    int p2 = (p1 != -1) ? rest.indexOf(',', p1 + 1) : -1;
+    int p3 = (p2 != -1) ? rest.indexOf(',', p2 + 1) : -1;
+    if (p1 != -1 && p2 != -1)
+    {
+      int vx = rest.substring(0, p1).toInt();
+      int vy = rest.substring(p1 + 1, p2).toInt();
+      int w  = (p3 != -1) ? rest.substring(p2 + 1, p3).toInt() : rest.substring(p2 + 1).toInt();
+      unsigned long dur = (p3 != -1) ? (unsigned long)rest.substring(p3 + 1).toInt() : 0;
+      mixDrive(vx, vy, w);
+      if (dur > 0)
+      {
+        motorStartTime = millis();
+        motorDuration = dur;
+        motorTimedActive = true;
+        continuousActive = false;
+      }
+      else
+      {
+        motorTimedActive = false;
+        motorDuration = 0;
+        continuousActive = (vx != 0 || vy != 0 || w != 0);
+      }
+      logOut("MOTOR: MIX Vx=" + String(vx) + " Vy=" + String(vy) + " W=" + String(w) + " [" + source + "]");
+      return;
+    }
+  }
+
   // Split by comma
   int firstComma = str.indexOf(',');
   if (firstComma == -1)
@@ -734,6 +773,7 @@ void executeMotorAction(String dir, int speed, unsigned long durationMs, String 
   {
     stopAll();
     motorTimedActive = false;
+    continuousActive = false;
     motorDuration = 0;
     logOut("CMD: STOP [" + source + "]");
     return;
@@ -771,11 +811,13 @@ void executeMotorAction(String dir, int speed, unsigned long durationMs, String 
     motorStartTime = millis();
     motorDuration = effectiveDurationMs;
     motorTimedActive = true;
+    continuousActive = false;
   }
   else
   {
     motorTimedActive = false;
     motorDuration = 0;
+    continuousActive = true;
   }
 
   // Mecanum Direction Execution
@@ -846,6 +888,17 @@ void checkMotorTimer()
       motorTimedActive = false;
       motorDuration = 0;
       logOut("MOTOR: Auto-stopped (Duration reached)");
+    }
+  }
+
+  // Comms watchdog for continuous streaming commands (duration=0)
+  if (continuousActive)
+  {
+    if (millis() - lastSerialCmdTime > SERIAL_COMMS_TIMEOUT_MS)
+    {
+      stopAll();
+      continuousActive = false;
+      logOut("MOTOR: Safety Watchdog triggered (Jetson comms timeout). Stopped.");
     }
   }
 }

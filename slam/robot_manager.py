@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 import os
+import re
 import sys
 import json
 import time
+import html
 import threading
 import queue
 from io import BytesIO
@@ -13,7 +15,8 @@ from PIL import Image, ImageDraw, ImageFont
 
 import rclpy
 from rclpy.node import Node
-from nav_msgs.msg import OccupancyGrid
+from nav_msgs.msg import OccupancyGrid, Odometry
+from sensor_msgs.msg import LaserScan
 from geometry_msgs.msg import PoseStamped
 from tf2_ros import Buffer, TransformListener
 from nav2_msgs.action import NavigateToPose
@@ -24,6 +27,11 @@ from rclpy.task import Future
 latest_map_img_bytes = b""
 map_lock = threading.Lock()
 map_received_count = 0
+
+# Diagnostics freshness tracking
+latest_scan_time = 0.0
+latest_odom_time = 0.0
+latest_map_time = 0.0
 
 # Command queue: web UI and terminal both push here; main loop drains it
 cmd_queue = queue.Queue()
@@ -45,7 +53,6 @@ _MIME = {
     '.png':  'image/png',
 }
 
-
 def _log(msg: str):
     """Print to stdout AND append to the web live-log panel."""
     print(msg)
@@ -55,19 +62,21 @@ def _log(msg: str):
         if len(_log_lines) > MAX_LOG:
             _log_lines.pop(0)
 
+def _sanitize_name(name: str) -> str:
+    """Sanitize name to allow only alphanumeric, underscores and hyphens (prevents directory traversal)."""
+    clean = re.sub(r'[^a-zA-Z0-9_\-]', '', name)
+    return clean.strip()
 
 def _make_placeholder_png(width: int = 480, height: int = 240) -> bytes:
     img = Image.new('RGB', (width, height), color=(40, 40, 40))
     draw = ImageDraw.Draw(img)
     draw.text((width // 2, height // 2 - 20), "Waiting for /map data...", fill=(180, 180, 180), anchor='mm')
-    draw.text((width // 2, height // 2 + 10), "Drive the robot to start SLAM mapping.", fill=(120, 120, 120), anchor='mm')
+    draw.text((width // 2, height // 2 + 10), "Move the robot slightly so laser odometry starts.", fill=(120, 120, 120), anchor='mm')
     buf = BytesIO()
     img.save(buf, format='PNG')
     return buf.getvalue()
 
-
 PLACEHOLDER_PNG = _make_placeholder_png()
-
 
 def _list_saved_maps():
     sets = {}
@@ -84,7 +93,6 @@ def _list_saved_maps():
         pass
     return sets
 
-
 # ── Web Server ────────────────────────────────────────────────────────────────
 
 class MapWebServer(BaseHTTPRequestHandler):
@@ -93,7 +101,7 @@ class MapWebServer(BaseHTTPRequestHandler):
         pass  # silence per-request logs
 
     def do_GET(self):
-        global map_received_count
+        global map_received_count, latest_scan_time, latest_odom_time, latest_map_time
         parsed = urlparse(self.path)
         path = parsed.path
         qs = parse_qs(parsed.query)
@@ -108,12 +116,13 @@ class MapWebServer(BaseHTTPRequestHandler):
             if saved:
                 dl_rows = ''
                 for map_name, files in sorted(saved.items()):
-                    btn_pgm  = f'<a class="btn" href="/download?file={map_name}_map.pgm">&#11123; .pgm</a>'  if files.get('pgm')  else '<span class="btn disabled">.pgm</span>'
-                    btn_yaml = f'<a class="btn" href="/download?file={map_name}_map.yaml">&#11123; .yaml</a>' if files.get('yaml') else '<span class="btn disabled">.yaml</span>'
-                    btn_json = f'<a class="btn" href="/download?file={map_name}_checkpoints.json">&#11123; .json</a>' if files.get('json') else '<span class="btn disabled">.json</span>'
+                    esc_name = html.escape(map_name)
+                    btn_pgm  = f'<a class="btn" href="/download?file={esc_name}_map.pgm">&#11123; .pgm</a>'  if files.get('pgm')  else '<span class="btn disabled">.pgm</span>'
+                    btn_yaml = f'<a class="btn" href="/download?file={esc_name}_map.yaml">&#11123; .yaml</a>' if files.get('yaml') else '<span class="btn disabled">.yaml</span>'
+                    btn_json = f'<a class="btn" href="/download?file={esc_name}_checkpoints.json">&#11123; .json</a>' if files.get('json') else '<span class="btn disabled">.json</span>'
                     has_all  = files.get('pgm') and files.get('yaml') and files.get('json')
-                    btn_anno = f'<a class="btn" href="/annotated.png?map={map_name}">&#128444; Annotated</a>' if has_all else '<span class="btn disabled">Annotated</span>'
-                    dl_rows += f'<tr><td class="mapname">{map_name}</td><td>{btn_pgm}</td><td>{btn_yaml}</td><td>{btn_json}</td><td>{btn_anno}</td></tr>'
+                    btn_anno = f'<a class="btn" href="/annotated.png?map={esc_name}">&#128444; Annotated</a>' if has_all else '<span class="btn disabled">Annotated</span>'
+                    dl_rows += f'<tr><td class="mapname">{esc_name}</td><td>{btn_pgm}</td><td>{btn_yaml}</td><td>{btn_json}</td><td>{btn_anno}</td></tr>'
                 downloads_html = f"""
   <div class="card">
     <h2>&#128190; Saved Maps</h2>
@@ -127,17 +136,18 @@ class MapWebServer(BaseHTTPRequestHandler):
 
             map_opts = '<option value="LIVE">Live Map (Current Session)</option>'
             for m in sorted(saved.keys()):
-                map_opts += f'<option value="{m}">{m}</option>'
+                esc_m = html.escape(m)
+                map_opts += f'<option value="{esc_m}">{esc_m}</option>'
 
             snap_btn = '<a class="btn" href="/snapshot.png">&#11123; Live map (.png)</a>' if has_map else '<span class="btn disabled">Live PNG (no map yet)</span>'
 
             with _log_lock:
-                log_html = '\n'.join(f'<div class="ll">{l}</div>' for l in reversed(_log_lines)) or '<div class="ll" style="color:#444">No activity yet...</div>'
+                log_html = '\n'.join(f'<div class="ll">{html.escape(l)}</div>' for l in reversed(_log_lines)) or '<div class="ll" style="color:#444">No activity yet...</div>'
 
             status_cls = 'badge-ok' if has_map else 'badge-wait'
-            status_txt = f'&#10004; {count} frames received' if has_map else '&#9899; Waiting for /map &mdash; drive the robot'
+            status_txt = f'&#10004; {count} frames received' if has_map else '&#9899; Waiting for /map &mdash; drive or rotate robot'
 
-            html = f"""<!DOCTYPE html>
+            html_page = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -150,13 +160,10 @@ class MapWebServer(BaseHTTPRequestHandler):
     .layout{{display:grid;grid-template-columns:1fr 1fr;gap:14px;max-width:1140px;margin:0 auto;}}
     .card{{background:#0f1624;border:1px solid #1a2640;border-radius:12px;padding:16px;margin-bottom:14px;}}
     .card h2{{color:#7ecfef;font-size:.95rem;margin-bottom:10px;}}
-    /* Map */
     .mapwrap{{text-align:center;}}
     .mapwrap img{{max-width:100%;max-height:52vh;border-radius:8px;border:1px solid #1a2640;}}
-    /* Status badge */
     .badge-ok{{display:inline-block;background:#0f2e10;color:#4caf50;border-radius:20px;padding:3px 12px;font-size:.76rem;margin-bottom:8px;}}
     .badge-wait{{display:inline-block;background:#2e1e08;color:#ff9800;border-radius:20px;padding:3px 12px;font-size:.76rem;margin-bottom:8px;}}
-    /* Command buttons */
     .cmd-grid{{display:grid;grid-template-columns:1fr 1fr;gap:9px;}}
     .cbtn{{padding:13px 8px;border:none;border-radius:9px;font-size:.88rem;font-weight:700;cursor:pointer;
             display:flex;flex-direction:column;align-items:center;gap:3px;transition:filter .15s;}}
@@ -167,22 +174,18 @@ class MapWebServer(BaseHTTPRequestHandler):
     .c2{{background:#0d4a22;color:#fff;}}
     .c3{{background:#4a2c00;color:#fff;}}
     .c4{{background:#3a0858;color:#fff;}}
-    /* Download/snap buttons */
     .btn{{display:inline-block;padding:5px 11px;border-radius:6px;background:#0077b6;color:#fff;
           text-decoration:none;font-size:.78rem;margin:2px;transition:background .2s;}}
     .btn:hover{{background:#0096c7;}}
     .btn.disabled{{background:#1a2640;color:#334;cursor:default;pointer-events:none;}}
-    /* Log */
     .logbox{{background:#040508;border-radius:8px;padding:10px;height:230px;overflow-y:auto;
               font-family:monospace;font-size:.75rem;line-height:1.65;}}
     .ll{{color:#5eadc8;border-bottom:1px solid #0a0d14;padding:1px 0;}}
-    /* Table */
     table{{width:100%;border-collapse:collapse;font-size:.8rem;}}
     th{{color:#7ecfef;border-bottom:1px solid #1a2640;padding:6px 10px;text-align:left;}}
     td{{padding:6px 10px;border-bottom:1px solid #0f1624;}}
     td.mapname{{font-weight:700;color:#99b;}}
     .snap{{text-align:center;margin-top:8px;}}
-    /* Modal */
     .mb{{display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:100;
           align-items:center;justify-content:center;}}
     .mb.open{{display:flex;}}
@@ -202,7 +205,6 @@ class MapWebServer(BaseHTTPRequestHandler):
   <p class="sub">Web UI &nbsp;|&nbsp; <a href="/status" style="color:#7ecfef">diagnostics</a></p>
 
   <div class="layout">
-    <!-- LEFT: map + commands -->
     <div>
       <div class="card">
         <h2>&#128247; Live Map</h2>
@@ -226,7 +228,6 @@ class MapWebServer(BaseHTTPRequestHandler):
       </div>
     </div>
 
-    <!-- RIGHT: log + downloads -->
     <div>
       <div class="card">
         <h2>&#128220; Live Log</h2>
@@ -236,7 +237,6 @@ class MapWebServer(BaseHTTPRequestHandler):
     </div>
   </div>
 
-  <!-- Modal: Set Checkpoint -->
   <div class="mb" id="m-cp">
     <div class="md">
       <h3>&#128204; Set Checkpoint</h3>
@@ -248,7 +248,6 @@ class MapWebServer(BaseHTTPRequestHandler):
     </div>
   </div>
 
-  <!-- Modal: Save Map -->
   <div class="mb" id="m-save">
     <div class="md">
       <h3>&#128190; Save Map</h3>
@@ -260,7 +259,6 @@ class MapWebServer(BaseHTTPRequestHandler):
     </div>
   </div>
 
-  <!-- Modal: Navigate -->
   <div class="mb" id="m-nav">
     <div class="md">
       <h3>&#128663; Navigate To Checkpoint</h3>
@@ -277,13 +275,11 @@ class MapWebServer(BaseHTTPRequestHandler):
   </div>
 
   <script>
-    // Refresh map image every 3 s without page reload
     setInterval(() => {{
       const img = document.getElementById('mapimg');
       if(img) img.src = '/map.png?t=' + Date.now();
     }}, 3000);
 
-    // Refresh log every 4 s
     setInterval(() => {{
       fetch('/api/log').then(r => r.text()).then(h => {{
         const b = document.getElementById('logbox');
@@ -343,7 +339,7 @@ class MapWebServer(BaseHTTPRequestHandler):
   </script>
 </body>
 </html>"""
-            self._send(200, 'text/html; charset=utf-8', html.encode())
+            self._send(200, 'text/html; charset=utf-8', html_page.encode())
 
         # ── /map.png ─────────────────────────────────────────────────────────
         elif path == '/map.png':
@@ -353,22 +349,54 @@ class MapWebServer(BaseHTTPRequestHandler):
 
         # ── /status ──────────────────────────────────────────────────────────
         elif path == '/status':
+            now = time.time()
             with map_lock:
                 count = map_received_count
-            self._send(200, 'application/json', json.dumps({
-                'map_frames_received': count, 'map_live': count > 0
-            }, indent=2).encode())
+            scan_fresh = (now - latest_scan_time < 3.0) and (latest_scan_time > 0)
+            odom_fresh = (now - latest_odom_time < 3.0) and (latest_odom_time > 0)
+            map_fresh  = (now - latest_map_time < 10.0) and (latest_map_time > 0)
+
+            # Check TF transform status
+            tf_available = False
+            if _node_ref is not None:
+                try:
+                    _node_ref.tf_buffer.lookup_transform('map', 'base_link', rclpy.time.Time())
+                    tf_available = True
+                except Exception:
+                    pass
+
+            status_payload = {
+                'map_frames_received': count,
+                'map_live': map_fresh,
+                'scan_live': scan_fresh,
+                'odom_live': odom_fresh,
+                'tf_map_to_base_live': tf_available,
+                'seconds_since_scan': round(now - latest_scan_time, 1) if latest_scan_time > 0 else None,
+                'seconds_since_odom': round(now - latest_odom_time, 1) if latest_odom_time > 0 else None,
+                'seconds_since_map': round(now - latest_map_time, 1) if latest_map_time > 0 else None,
+            }
+            self._send(200, 'application/json', json.dumps(status_payload, indent=2).encode())
 
         # ── /download ────────────────────────────────────────────────────────
         elif path == '/download':
             filename = qs.get('file', [''])[0]
             basename = os.path.basename(filename)
+            # Prevent directory traversal
+            if '..' in filename or '/' in filename or '\\' in filename:
+                self._send(400, 'text/plain', b'Invalid path'); return
+
             ext = os.path.splitext(basename)[1].lower()
-            if ext not in _MIME or '..' in filename:
-                self._send(400, 'text/plain', b'Invalid file'); return
+            if ext not in _MIME:
+                self._send(400, 'text/plain', b'Invalid file extension'); return
+
+            # Enforce that only SLAM artifacts (_map.pgm, _map.yaml, _checkpoints.json) can be fetched
+            if not any(basename.endswith(suffix) for suffix in ['_map.pgm', '_map.yaml', '_checkpoints.json']):
+                self._send(403, 'text/plain', b'Access denied: Only map files are accessible'); return
+
             filepath = os.path.join(SAVE_DIR, basename)
             if not os.path.isfile(filepath):
                 self._send(404, 'text/plain', b'File not found'); return
+
             with open(filepath, 'rb') as f:
                 data = f.read()
             self.send_response(200)
@@ -394,13 +422,13 @@ class MapWebServer(BaseHTTPRequestHandler):
         # ── /api/log ──────────────────────────────────────────────────────────
         elif path == '/api/log':
             with _log_lock:
-                html = '\n'.join(f'<div class="ll">{l}</div>' for l in reversed(_log_lines)) \
-                       or '<div class="ll" style="color:#444">No activity yet...</div>'
-            self._send(200, 'text/html; charset=utf-8', html.encode())
+                html_log = '\n'.join(f'<div class="ll">{html.escape(l)}</div>' for l in reversed(_log_lines)) \
+                           or '<div class="ll" style="color:#444">No activity yet...</div>'
+            self._send(200, 'text/html; charset=utf-8', html_log.encode())
 
         # ── /api/checkpoints ─────────────────────────────────────────────────
         elif path == '/api/checkpoints':
-            map_name = qs.get('map', [''])[0]
+            map_name = _sanitize_name(qs.get('map', [''])[0])
             json_path = os.path.join(SAVE_DIR, f'{map_name}_checkpoints.json')
             pts = []
             if os.path.isfile(json_path):
@@ -409,7 +437,7 @@ class MapWebServer(BaseHTTPRequestHandler):
                         pts = list(json.load(f).keys())
                 except Exception:
                     pass
-            if _node_ref is not None:
+            if _node_ref is not None and map_name == 'LIVE':
                 for k in _node_ref.checkpoints:
                     if k not in pts:
                         pts.append(k)
@@ -417,7 +445,7 @@ class MapWebServer(BaseHTTPRequestHandler):
 
         # ── /annotated.png ────────────────────────────────────────────────────
         elif path == '/annotated.png':
-            map_name  = os.path.basename(qs.get('map', [''])[0])
+            map_name  = _sanitize_name(qs.get('map', [''])[0])
             pgm_path  = os.path.join(SAVE_DIR, f"{map_name}_map.pgm")
             yaml_path = os.path.join(SAVE_DIR, f"{map_name}_map.yaml")
             json_path = os.path.join(SAVE_DIR, f"{map_name}_checkpoints.json")
@@ -463,8 +491,13 @@ class MapWebServer(BaseHTTPRequestHandler):
         body = self.rfile.read(length)
         try:
             payload = json.loads(body)
+            if not isinstance(payload, dict):
+                self._send(400, 'application/json', b'{"error":"payload must be a JSON object"}'); return
+            if 'cmd' not in payload or not isinstance(payload['cmd'], int):
+                self._send(400, 'application/json', b'{"error":"missing or invalid cmd field"}'); return
         except Exception:
             self._send(400, 'application/json', b'{"error":"bad json"}'); return
+
         cmd_queue.put(payload)
         self._send(200, 'application/json', json.dumps({'queued': True}).encode())
 
@@ -475,11 +508,9 @@ class MapWebServer(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-
 def run_web_server():
     server = HTTPServer(('0.0.0.0', 8000), MapWebServer)
     server.serve_forever()
-
 
 # ── ROS Node ──────────────────────────────────────────────────────────────────
 
@@ -487,11 +518,21 @@ class RobotManagerNode(Node):
     def __init__(self):
         super().__init__('robot_manager_node')
         self.map_sub = self.create_subscription(OccupancyGrid, '/map', self.map_callback, 10)
+        self.scan_sub = self.create_subscription(LaserScan, '/scan', self.scan_callback, 10)
+        self.odom_sub = self.create_subscription(Odometry, '/odom', self.odom_callback, 10)
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
         self.checkpoints = {}
         self.nav_client = ActionClient(self, NavigateToPose, 'navigate_to_pose')
         self._last_eta_log = 0.0
+
+    def scan_callback(self, msg):
+        global latest_scan_time
+        latest_scan_time = time.time()
+
+    def odom_callback(self, msg):
+        global latest_odom_time
+        latest_odom_time = time.time()
 
     def send_nav_goal(self, pt, checkpoint_name):
         _log(f"[NAV] Waiting for NavigateToPose action server (up to 15s)...")
@@ -516,24 +557,29 @@ class RobotManagerNode(Node):
         self.send_goal_future.add_done_callback(self._nav_goal_response_cb)
 
     def _nav_feedback_cb(self, feedback_msg):
-        eta = feedback_msg.feedback.estimated_time_remaining
+        fb = feedback_msg.feedback
+        eta = fb.estimated_time_remaining
         eta_sec = eta.sec + eta.nanosec * 1e-9
+        dist = getattr(fb, 'distance_remaining', None)
         
         now = time.time()
         if now - self._last_eta_log > 2.0:
-            _log(f"[NAV] ETA: {eta_sec:.1f}s")
+            dist_str = f" | Dist left: {dist:.2f}m" if dist is not None else ""
+            if eta_sec > 0:
+                _log(f"[NAV] ETA: {eta_sec:.1f}s{dist_str}")
+            else:
+                _log(f"[NAV] In progress{dist_str}")
             self._last_eta_log = now
 
     def _nav_goal_response_cb(self, future):
         goal_handle = future.result()
         if not goal_handle.accepted:
             _log("[NAV] Goal REJECTED by Nav2! Likely causes:")
-            _log("[NAV]   1) No map→odom TF (SLAM Toolbox not publishing TF?)")
-            _log("[NAV]   2) Robot pose unknown (AMCL not running for saved maps)")
+            _log("[NAV]   1) No map->odom TF (SLAM Toolbox / RF2O not publishing TF?)")
+            _log("[NAV]   2) Robot pose unknown")
             _log("[NAV]   3) Nav2 costmap not initialised yet — wait 10s and retry")
-            _log("[DEBUG] Run inside container: ros2 run tf2_tools view_frames")
             return
-        _log("[NAV] Goal ACCEPTED — Nav2 is calculating path and moving robot...")
+        _log("[NAV] Goal ACCEPTED — Nav2 is planning path and moving robot...")
         self._get_result_future = goal_handle.get_result_async()
         self._get_result_future.add_done_callback(self._nav_result_cb)
 
@@ -543,7 +589,8 @@ class RobotManagerNode(Node):
         _log(f"[NAV] Navigation finished — status: {status_str}")
 
     def map_callback(self, msg: OccupancyGrid):
-        global latest_map_img_bytes, map_received_count
+        global latest_map_img_bytes, map_received_count, latest_map_time
+        latest_map_time = time.time()
         w, h = msg.info.width, msg.info.height
         if w == 0 or h == 0:
             return
@@ -586,43 +633,55 @@ class RobotManagerNode(Node):
             latest_map_img_bytes = buf.getvalue()
 
     def record_checkpoint(self, name):
+        clean_name = _sanitize_name(name)
+        if not clean_name:
+            _log("[ERROR] Invalid checkpoint name.")
+            return
         try:
-            # Use Time(0) = "latest available" transform instead of clock.now().
-            # clock.now() requires the TF to exist at that exact timestamp, which
-            # fails whenever there is any pipeline lag. Time(0) is always robust.
             t = self.tf_buffer.lookup_transform('map', 'base_link', rclpy.time.Time())
             p = t.transform.translation
             q = t.transform.rotation
-            self.checkpoints[name] = {'x': p.x, 'y': p.y, 'z': p.z,
-                                       'qx': q.x, 'qy': q.y, 'qz': q.z, 'qw': q.w}
-            _log(f"[SUCCESS] Checkpoint '{name}' pinned at ({p.x:.2f}, {p.y:.2f})")
+            self.checkpoints[clean_name] = {'x': p.x, 'y': p.y, 'z': p.z,
+                                            'qx': q.x, 'qy': q.y, 'qz': q.z, 'qw': q.w}
+            _log(f"[SUCCESS] Checkpoint '{clean_name}' pinned at ({p.x:.2f}, {p.y:.2f})")
         except Exception as e:
             _log(f"[ERROR] Could not record checkpoint: {e}")
-            _log("[HINT] TF error? Drive the robot a little so RF2O builds odom->base_link first.")
+            _log("[HINT] TF error? Drive or rotate the robot a little so RF2O builds odom->base_link first.")
 
     def save_map_and_metadata(self, room_name):
-        _log(f"[SAVE] Saving map '{room_name}'...")
+        clean_room = _sanitize_name(room_name)
+        if not clean_room:
+            _log("[ERROR] Invalid map name for saving.")
+            return
+
+        _log(f"[SAVE] Saving map '{clean_room}'...")
         import subprocess
         env = os.environ.copy()
         env['ROS_LOCALHOST_ONLY'] = '1'
+        save_success = False
         try:
             subprocess.run(
                 ["ros2", "run", "nav2_map_server", "map_saver_cli",
-                 "-f", f"/root/{room_name}_map",
+                 "-f", f"/root/{clean_room}_map",
                  "--ros-args", "-p", "map_subscribe_transient_local:=true",
                  "-p", "use_sim_time:=false"],
                 check=True, env=env, timeout=30
             )
-            _log(f"[SUCCESS] Map grid saved to /root/{room_name}_map.pgm")
+            _log(f"[SUCCESS] Map grid saved to /root/{clean_room}_map.pgm")
+            save_success = True
         except subprocess.CalledProcessError as e:
-            _log(f"[ERROR] map_saver_cli failed (code {e.returncode}). Run manually in Terminal 5!")
+            _log(f"[ERROR] map_saver_cli failed (code {e.returncode}).")
         except subprocess.TimeoutExpired:
-            _log("[ERROR] map_saver_cli timed out. Run manually in Terminal 5!")
-        meta = f"/root/{room_name}_checkpoints.json"
-        with open(meta, 'w') as f:
-            json.dump(self.checkpoints, f, indent=4)
-        _log(f"[SUCCESS] {len(self.checkpoints)} checkpoints → {meta}")
+            _log("[ERROR] map_saver_cli timed out.")
 
+        # ONLY save checkpoints metadata if map saver succeeded to avoid orphaned or mismatched files
+        if save_success:
+            meta = f"/root/{clean_room}_checkpoints.json"
+            with open(meta, 'w') as f:
+                json.dump(self.checkpoints, f, indent=4)
+            _log(f"[SUCCESS] {len(self.checkpoints)} checkpoints -> {meta}")
+        else:
+            _log("[WARN] Skipping checkpoints save because map saving failed.")
 
 # ── Command Dispatcher ────────────────────────────────────────────────────────
 
@@ -632,31 +691,33 @@ def _handle_command(node, payload):
     if cmd == 1:
         with map_lock:
             count = map_received_count
-        _log(f"[STATUS] /map frames: {count}" + (" — active!" if count > 0 else " — drive robot to start."))
+        _log(f"[STATUS] /map frames: {count}" + (" — active!" if count > 0 else " — move/turn robot to start SLAM."))
 
     elif cmd == 2:
-        name = payload.get('checkpoint_name', '').strip()
+        name = str(payload.get('checkpoint_name', '')).strip()
         if name:
             node.record_checkpoint(name)
         else:
             _log("[ERROR] No checkpoint name provided.")
 
     elif cmd == 3:
-        map_name = payload.get('map_name', '').strip()
+        map_name = str(payload.get('map_name', '')).strip()
         if map_name:
             threading.Thread(target=node.save_map_and_metadata, args=(map_name,), daemon=True).start()
         else:
             _log("[ERROR] No map name provided.")
 
     elif cmd == 4:
-        map_name   = payload.get('map_name', '').strip()
-        checkpoint = payload.get('checkpoint', '').strip()
+        map_name   = _sanitize_name(str(payload.get('map_name', '')).strip())
+        checkpoint = _sanitize_name(str(payload.get('checkpoint', '')).strip())
         
         if map_name == 'LIVE':
             saved = node.checkpoints
             if not saved:
                 _log("[ERROR] No checkpoints set in current Live session yet."); return
         else:
+            # Check if this saved map was created in a previous session
+            _log(f"[NAV NOTICE] Navigating using saved map '{map_name}'. Ensure current live mapping origin matches saved map origin, or navigate in the active LIVE session.")
             cp_file = f"/root/{map_name}_checkpoints.json"
             if not os.path.exists(cp_file):
                 _log(f"[ERROR] Map '{map_name}' not found at {cp_file}"); return
@@ -664,7 +725,7 @@ def _handle_command(node, payload):
                 saved = json.load(f)
                 
         if checkpoint not in saved:
-            _log(f"[ERROR] Checkpoint '{checkpoint}' not in map '{map_name}'"); return
+            _log(f"[ERROR] Checkpoint '{checkpoint}' not found in map '{map_name}'"); return
         
         pt = saved[checkpoint]
         node.send_nav_goal(pt, checkpoint)
@@ -673,7 +734,6 @@ def _handle_command(node, payload):
         _log("[EXIT] Shutting down...")
         rclpy.shutdown()
         sys.exit(0)
-
 
 # ── Entry Point ───────────────────────────────────────────────────────────────
 
@@ -723,7 +783,6 @@ def interactive_menu():
             _handle_command(node, payload)
         except queue.Empty:
             pass
-
 
 if __name__ == '__main__':
     interactive_menu()

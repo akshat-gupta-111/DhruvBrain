@@ -257,7 +257,9 @@ class DhruvOrchestrator:
                 time.sleep(1)
 
 def start_dashboard():
-    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="warning")
+    # Use port 8080 so it does NOT conflict with the SLAM web viewer on port 8000
+    port = int(os.getenv("DASHBOARD_PORT", "8080"))
+    uvicorn.run(app, host="0.0.0.0", port=port, log_level="warning")
 
 def cleanup_audio_server():
     print("\n[DhruvBrain] Stopping host audio playback...")
@@ -269,6 +271,12 @@ def cleanup_audio_server():
 
 def signal_handler(sig, frame):
     cleanup_audio_server()
+    if 'orchestrator' in globals() and orchestrator:
+        try:
+            orchestrator.motors.close()
+            orchestrator.lidar.stop()
+        except:
+            pass
     sys.exit(0)
 
 if __name__ == "__main__":
@@ -283,6 +291,13 @@ if __name__ == "__main__":
     try:
         orchestrator.run()
     except KeyboardInterrupt:
-        print("\n[Master] Shutting down...")
+        print("\n[DhruvBrain] Interrupted by user.")
     finally:
         cleanup_audio_server()
+        if orchestrator:
+            try:
+                orchestrator.motors.close()
+                orchestrator.lidar.stop()
+            except:
+                pass
+        print("\n[Master] Shutting down...")

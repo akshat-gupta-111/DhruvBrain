@@ -90,18 +90,24 @@ class MotorController:
         self.serial_thread.start()
 
     def _find_arduino_port(self) -> str:
-        """Auto-detects Arduino UNO R4 CDC port across Linux and Windows."""
-        for candidate in ["/dev/ttyACM0", "/dev/ttyACM1", "/dev/ttyUSB0", "/dev/ttyUSB1"]:
+        """Auto-detects Arduino UNO R4 CDC port across Linux and Windows.
+        NEVER inspects or binds to /dev/ttyUSB* (reserved strictly for RPLidar).
+        """
+        for candidate in ["/dev/ttyACM0", "/dev/ttyACM1", "/dev/ttyACM2"]:
             if os.path.exists(candidate):
                 return candidate
         try:
             import serial.tools.list_ports
             for p in serial.tools.list_ports.comports():
+                dev = (p.device or "").lower()
+                # Skip any ttyUSB device (RPLidar)
+                if "ttyusb" in dev:
+                    continue
                 desc = (p.description or "").lower()
                 hwid = (p.hwid or "").lower()
                 if "arduino" in desc or "uno" in desc or "2341:" in hwid:
                     return p.device
-            ports = list(serial.tools.list_ports.comports())
+            ports = [p for p in serial.tools.list_ports.comports() if "ttyusb" not in (p.device or "").lower()]
             if ports:
                 return ports[0].device
         except Exception:
@@ -148,9 +154,9 @@ class MotorController:
                     self.serial.flush()
                     send_time = time.time()
 
-                    # Wait for ACK response from Arduino (max 1.0s)
+                    # Wait for ACK response from Arduino (max 0.5s)
                     start_wait = time.time()
-                    while time.time() - start_wait < 1.0:
+                    while time.time() - start_wait < 0.5:
                         if self.serial.in_waiting > 0:
                             line = self.serial.readline().decode("utf-8", errors="replace").strip()
                             if line == "ACK":
@@ -161,15 +167,16 @@ class MotorController:
                                     self.clear_queue()
                         time.sleep(0.01)
 
-                    # KEY FIX: If this was a timed movement command, wait for the
-                    # full duration before allowing the next command to be sent.
-                    # Without this, the next command (even just an LED update) will
-                    # interrupt the motor mid-movement.
+                    # If this was a timed movement command, wait in small slices
+                    # so that if a STOP or new priority command is queued, we can break early.
                     if move_duration > 0:
                         elapsed_ms = (time.time() - send_time) * 1000
                         remaining_ms = move_duration - elapsed_ms
-                        if remaining_ms > 50:  # Only sleep if more than 50ms left
-                            time.sleep(remaining_ms / 1000.0)
+                        while remaining_ms > 20 and self.running:
+                            if not self.cmd_queue.empty():
+                                break  # New command arrived, break to process immediately!
+                            time.sleep(0.02)
+                            remaining_ms = move_duration - ((time.time() - send_time) * 1000)
 
                 except queue.Empty:
                     pass
@@ -246,8 +253,9 @@ class MotorController:
         self.running = False
         if self.serial and self.serial.is_open:
             try:
-                self.send_raw("<STOP>")
-                time.sleep(0.1)
+                self.serial.write(b"<STOP>\n")
+                self.serial.flush()
+                time.sleep(0.05)
                 self.serial.close()
             except Exception:
                 pass
@@ -408,9 +416,9 @@ class JetsonLiDAR:
         self.port = '/dev/ttyUSB0'
         self.running = False
         self._thread = None
-        self.latest_safest_direction = ""
+        self.latest_safest_direction = "F"
         self.latest_obstacles = ""
-        self.latest_closest_obstacles = {}
+        self.latest_closest_obstacles = {'F': 0, 'FR': 0, 'R': 0, 'BR': 0, 'B': 0, 'BL': 0, 'L': 0, 'FL': 0}
         self._initialized = True
 
     def prompt_user(self) -> str:
@@ -430,8 +438,62 @@ class JetsonLiDAR:
             self._thread = None
 
     def _lidar_loop(self):
-        from rplidar import RPLidar
+        # First check if ROS 2 /scan topic is available (e.g. SLAM container or ROS rplidar driver is running)
+        ros_scan_available = False
+        try:
+            import rclpy
+            from sensor_msgs.msg import LaserScan
+            if not rclpy.ok():
+                rclpy.init()
+            node = rclpy.create_node('jetson_brain_scan_consumer')
+            
+            def scan_cb(msg):
+                sector_data = { 'F': [], 'FR': [], 'R': [], 'BR': [], 'B': [], 'BL': [], 'L': [], 'FL': [] }
+                angle = msg.angle_min
+                for dist in msg.ranges:
+                    if msg.range_min < dist < msg.range_max and dist > 0.2:
+                        deg = math.degrees(angle) % 360.0
+                        corrected_angle = (deg - 90.0) % 360.0
+                        sec = get_sector(corrected_angle)
+                        if sec:
+                            sector_data[sec].append(dist * 1000.0) # convert to mm
+                    angle += msg.angle_increment
+
+                closest = {}
+                for sector, dists in sector_data.items():
+                    closest[sector] = min(dists) if dists else 0
+                self.latest_closest_obstacles = closest
+                if closest:
+                    self.latest_safest_direction = max(closest, key=closest.get)
+                    self.latest_obstacles = (f"F:{closest.get('F',0)/1000:.1f}m, "
+                                             f"B:{closest.get('B',0)/1000:.1f}m, "
+                                             f"L:{closest.get('L',0)/1000:.1f}m, "
+                                             f"R:{closest.get('R',0)/1000:.1f}m | Safest: {self.latest_safest_direction}")
+
+            import math
+            sub = node.create_subscription(LaserScan, '/scan', scan_cb, 10)
+            print("[HAL LiDAR] Subscribed to ROS 2 topic /scan successfully!")
+            ros_scan_available = True
+            while self.running and rclpy.ok():
+                rclpy.spin_once(node, timeout_sec=0.1)
+            node.destroy_node()
+            return
+        except Exception as e:
+            # ROS 2 not installed or not running in this environment
+            pass
+
+        # Standalone fallback: direct serial using rplidar library only if /dev/ttyUSB0 exists
+        # and ROS is NOT actively using it
+        try:
+            from rplidar import RPLidar
+        except ImportError:
+            print("[HAL LiDAR] rplidar python package not available.")
+            return
+
         while self.running:
+            if not os.path.exists(self.port):
+                time.sleep(2.0)
+                continue
             try:
                 lidar = RPLidar(self.port, baudrate=115200, timeout=3)
                 try:

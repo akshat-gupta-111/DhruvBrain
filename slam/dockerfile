@@ -139,11 +139,13 @@ WORKDIR /workspace
 
 # Copy application scripts
 COPY robot_manager.py /workspace/robot_manager.py
-COPY entrypoint.sh   /workspace/entrypoint.sh
+COPY cmd_vel_bridge.py /workspace/cmd_vel_bridge.py
+COPY rf2o.launch.py   /workspace/rf2o.launch.py
+COPY entrypoint.sh    /workspace/entrypoint.sh
 COPY nav2_params.yaml /workspace/nav2_params.yaml
 
-RUN chmod +x /workspace/robot_manager.py /workspace/entrypoint.sh && \
-    python3 -m py_compile /workspace/robot_manager.py
+RUN chmod +x /workspace/robot_manager.py /workspace/cmd_vel_bridge.py /workspace/entrypoint.sh && \
+    python3 -m py_compile /workspace/robot_manager.py /workspace/cmd_vel_bridge.py
 
 # -------------------------------------------------
 # 10. Automatically source ROS in interactive shells

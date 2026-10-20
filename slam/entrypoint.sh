@@ -120,12 +120,23 @@ sleep 3
 # STEP 3 — RF2O Laser Odometry  (/scan → /odom)
 # -----------------------------------------------------------------------------
 echo "[3/6] Starting RF2O odometry (/scan → /odom)..."
-ros2 launch rf2o_laser_odometry rf2o_laser_odometry.launch.py \
-    laser_scan_topic:=/scan \
-    odom_topic:=/odom \
-    publish_tf:=true \
-    base_frame_id:=base_link \
-    odom_frame_id:=odom >/tmp/rf2o.log 2>&1 &
+RF2O_LAUNCH="/workspace/rf2o.launch.py"
+if [ -f /workspace/src_live/rf2o.launch.py ]; then
+    RF2O_LAUNCH="/workspace/src_live/rf2o.launch.py"
+fi
+
+if [ -f "$RF2O_LAUNCH" ]; then
+    ros2 launch "$RF2O_LAUNCH" >/tmp/rf2o.log 2>&1 &
+else
+    ros2 run rf2o_laser_odometry rf2o_laser_odometry_node \
+        --ros-args \
+        -p laser_scan_topic:=/scan \
+        -p odom_topic:=/odom \
+        -p publish_tf:=true \
+        -p base_frame_id:=base_link \
+        -p odom_frame_id:=odom \
+        -p freq:=10.0 >/tmp/rf2o.log 2>&1 &
+fi
 RF2O_PID=$!
 
 # RF2O needs a few seconds to read scan data and start publishing odom.
@@ -144,7 +155,7 @@ echo "      Allowing SLAM Toolbox 10 s to initialise..."
 sleep 10
 
 # -----------------------------------------------------------------------------
-# STEP 5 — ROS-Arduino Bridge (translates /cmd_vel → <FWD> serial commands)
+# STEP 5 — ROS-Arduino Bridge (translates /cmd_vel → <MIX> serial commands)
 # -----------------------------------------------------------------------------
 echo "[5/6] Starting ROS-Arduino Bridge..."
 if [ -f /workspace/src_live/cmd_vel_bridge.py ]; then
@@ -160,9 +171,6 @@ sleep 2
 # STEP 6 — Nav2 Navigation Stack (needs /map + TF chain from SLAM Toolbox)
 # -----------------------------------------------------------------------------
 echo "[6/6] Starting Nav2 Navigation Stack..."
-# slam:=true tells Nav2 to use SLAM Toolbox's map→odom TF for localisation
-# instead of requiring a separate AMCL node. Without this flag Nav2 rejects
-# every NavigateToPose goal because it has no robot pose estimate.
 NAV2_PARAMS="/workspace/nav2_params.yaml"
 if [ -f /workspace/src_live/nav2_params.yaml ]; then
     NAV2_PARAMS="/workspace/src_live/nav2_params.yaml"
@@ -172,13 +180,11 @@ if [ -f "$NAV2_PARAMS" ]; then
     echo "      Using custom Nav2 parameters: $NAV2_PARAMS"
     ros2 launch nav2_bringup navigation_launch.py \
         use_sim_time:=false \
-        slam:=true \
         params_file:="$NAV2_PARAMS" >/tmp/nav2.log 2>&1 &
 else
     echo "      [WARN] $NAV2_PARAMS not found, using default Nav2 parameters"
     ros2 launch nav2_bringup navigation_launch.py \
-        use_sim_time:=false \
-        slam:=true >/tmp/nav2.log 2>&1 &
+        use_sim_time:=false >/tmp/nav2.log 2>&1 &
 fi
 NAV2_PID=$!
 
