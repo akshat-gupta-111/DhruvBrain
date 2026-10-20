@@ -139,8 +139,9 @@ class MapWebServer(BaseHTTPRequestHandler):
                     
                     is_active = (current_active_map == map_name)
                     btn_load = f'<span class="badge-ok" style="margin:0">Active</span>' if is_active else f'<button class="btn" style="background:#7b2cbf;cursor:pointer;border:none" onclick="loadMapMode(\'{esc_name}\')">&#128640; Load Map</button>'
+                    btn_del  = f'<button class="btn" style="background:#b7094c;cursor:pointer;border:none" onclick="deleteMap(\'{esc_name}\')">&#128465; Delete</button>'
                     
-                    dl_rows += f'<tr><td class="mapname">{esc_name}</td><td>{btn_load}</td><td>{btn_pgm}</td><td>{btn_yaml}</td><td>{btn_json}</td><td>{btn_anno}</td></tr>'
+                    dl_rows += f'<tr><td class="mapname">{esc_name}</td><td>{btn_load}</td><td>{btn_pgm}</td><td>{btn_yaml}</td><td>{btn_json}</td><td>{btn_anno}</td><td>{btn_del}</td></tr>'
                 
                 active_str = f'<div style="margin-bottom:8px;font-size:0.82rem;color:#7ecfef">Active Map: <b>{current_active_map if current_active_map else "Live Session"}</b></div>'
                 downloads_html = f"""
@@ -148,7 +149,7 @@ class MapWebServer(BaseHTTPRequestHandler):
     <h2>&#128190; Saved Maps</h2>
     {active_str}
     <table>
-      <thead><tr><th>Map Name</th><th>Action</th><th>.pgm</th><th>.yaml</th><th>.json</th><th>Annotated</th></tr></thead>
+      <thead><tr><th>Map Name</th><th>Action</th><th>.pgm</th><th>.yaml</th><th>.json</th><th>Annotated</th><th>Delete</th></tr></thead>
       <tbody>{dl_rows}</tbody>
     </table>
   </div>"""
@@ -362,6 +363,13 @@ class MapWebServer(BaseHTTPRequestHandler):
     function loadMapMode(mapName) {{
       post({{cmd: 6, map_name: mapName}}).then(() => {{
         setTimeout(() => location.reload(), 1200);
+      }});
+    }}
+
+    function deleteMap(mapName) {{
+      if(!confirm('Are you sure you want to delete map \"' + mapName + '\"?\\n\\nThis will remove all associated .pgm, .yaml, and .json checkpoints files.')) return;
+      post({{cmd: 8, map_name: mapName}}).then(() => {{
+        setTimeout(() => location.reload(), 800);
       }});
     }}
   </script>
@@ -905,6 +913,35 @@ def _handle_command(node, payload):
         y = float(payload.get('y', 0.0))
         yaw = float(payload.get('yaw', 0.0))
         node.set_initial_pose(x, y, yaw)
+
+    elif cmd == 8:
+        # Delete saved map and associated artifacts
+        map_name = _sanitize_name(str(payload.get('map_name', '')).strip())
+        if not map_name:
+            _log("[ERROR] No map name specified for deletion.")
+            return
+
+        _log(f"[DELETE] Deleting map '{map_name}' files...")
+        deleted_count = 0
+        for ext in ['_map.pgm', '_map.yaml', '_checkpoints.json', '_map.posegraph', '_map.data']:
+            filepath = os.path.join(SAVE_DIR, f"{map_name}{ext}")
+            try:
+                if os.path.isfile(filepath):
+                    os.remove(filepath)
+                    deleted_count += 1
+            except Exception as e:
+                _log(f"[ERROR] Failed to delete {filepath}: {e}")
+
+        # If deleted map was the active map, clear active map record
+        try:
+            if os.path.isfile("/root/default_mode.txt"):
+                with open("/root/default_mode.txt", 'w') as f:
+                    f.write('export NAV_MODE="mapping"\nexport ACTIVE_MAP=""\n')
+        except Exception:
+            pass
+
+        _log(f"[SUCCESS] Deleted map '{map_name}' ({deleted_count} files removed).")
+
 
 # ── Entry Point ───────────────────────────────────────────────────────────────
 
