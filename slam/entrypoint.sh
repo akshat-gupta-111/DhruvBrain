@@ -135,6 +135,7 @@ else
         -p publish_tf:=true \
         -p base_frame_id:=base_link \
         -p odom_frame_id:=odom \
+        -p init_pose_from_topic:="" \
         -p freq:=10.0 >/tmp/rf2o.log 2>&1 &
 fi
 RF2O_PID=$!
