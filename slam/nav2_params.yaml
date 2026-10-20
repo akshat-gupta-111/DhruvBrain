@@ -42,7 +42,7 @@ controller_server:
     general_goal_checker:
       stateful: True
       plugin: "nav2_controller::SimpleGoalChecker"
-      xy_goal_tolerance: 0.30
+      xy_goal_tolerance: 0.12       # Precise pinpointing: ±12 cm
       yaw_goal_tolerance: 3.14159   # Accepts arrival from any heading without requiring spinning in place
 
     FollowPath:
@@ -71,8 +71,9 @@ controller_server:
       linear_granularity: 0.05
       angular_granularity: 0.025
       transform_tolerance: 0.3
-      xy_goal_tolerance: 0.30
-      trans_stopped_velocity: 0.25
+      xy_goal_tolerance: 0.12
+      trans_stopped_velocity: 0.15
+
       short_circuit_trajectory_evaluation: True
       stateful: True
       critics: ["RotateToGoal", "Oscillation", "BaseObstacle", "GoalAlign", "PathAlign", "PathDist", "GoalDist"]
