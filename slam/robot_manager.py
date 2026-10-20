@@ -137,22 +137,20 @@ class MapWebServer(BaseHTTPRequestHandler):
                     has_all  = files.get('pgm') and files.get('yaml') and files.get('json')
                     btn_anno = f'<a class="btn" href="/annotated.png?map={esc_name}">&#128444; Annotated</a>' if has_all else '<span class="btn disabled">Annotated</span>'
                     
-                    is_active = (current_active_mode == "localization" and current_active_map == map_name)
-                    btn_load = f'<span class="badge-ok" style="margin:0">Active Map</span>' if is_active else f'<button class="btn" style="background:#7b2cbf;cursor:pointer;border:none" onclick="loadMapMode(\'{esc_name}\')">&#128640; Use Map</button>'
+                    is_active = (current_active_map == map_name)
+                    btn_load = f'<span class="badge-ok" style="margin:0">Active</span>' if is_active else f'<button class="btn" style="background:#7b2cbf;cursor:pointer;border:none" onclick="loadMapMode(\'{esc_name}\')">&#128640; Load Map</button>'
                     
                     dl_rows += f'<tr><td class="mapname">{esc_name}</td><td>{btn_load}</td><td>{btn_pgm}</td><td>{btn_yaml}</td><td>{btn_json}</td><td>{btn_anno}</td></tr>'
                 
-                mode_bar = f'<div style="margin-bottom:8px;font-size:0.82rem;color:#7ecfef">Current Stack: <b>{current_active_mode.upper()}</b> {("(" + current_active_map + ")") if current_active_map else ""}</div>'
-                reset_btn = '<button class="btn" style="background:#d90429;border:none;cursor:pointer;margin-top:6px" onclick="resetMappingMode()">&#128260; Reset to New Mapping Mode</button>'
+                active_str = f'<div style="margin-bottom:8px;font-size:0.82rem;color:#7ecfef">Active Map: <b>{current_active_map if current_active_map else "Live Session"}</b></div>'
                 downloads_html = f"""
   <div class="card">
-    <h2>&#128190; Saved Maps &amp; Localization</h2>
-    {mode_bar}
+    <h2>&#128190; Saved Maps</h2>
+    {active_str}
     <table>
       <thead><tr><th>Map Name</th><th>Action</th><th>.pgm</th><th>.yaml</th><th>.json</th><th>Annotated</th></tr></thead>
       <tbody>{dl_rows}</tbody>
     </table>
-    {reset_btn}
   </div>"""
             else:
                 downloads_html = '<div class="card"><p style="color:#555">No saved maps yet. Use the Save Map button.</p></div>'
@@ -362,18 +360,8 @@ class MapWebServer(BaseHTTPRequestHandler):
     }}
 
     function loadMapMode(mapName) {{
-      if(!confirm('Switch system to Localization Mode on saved map \"' + mapName + '\"?\\n\\nThis will configure ROS to localize against ' + mapName + ' and Nav2 to navigate to its saved checkpoints.')) return;
-      post({{cmd: 6, map_name: mapName, mode: 'localization'}}).then(() => {{
-        alert('Configuration saved for map \"' + mapName + '\".\\n\\nPlease run on Jetson terminal:\\nsudo docker compose restart\\n\\nAfter restart, the saved map will load permanently with full AMCL localization!');
-        setTimeout(() => location.reload(), 1500);
-      }});
-    }}
-
-    function resetMappingMode() {{
-      if(!confirm('Switch back to SLAM Mapping Mode?\\n\\nThis resets the robot to explore and map new environments.')) return;
-      post({{cmd: 6, map_name: '', mode: 'mapping'}}).then(() => {{
-        alert('Set to SLAM Mapping mode.\\n\\nPlease run on Jetson terminal:\\nsudo docker compose restart');
-        setTimeout(() => location.reload(), 1500);
+      post({{cmd: 6, map_name: mapName}}).then(() => {{
+        setTimeout(() => location.reload(), 1200);
       }});
     }}
   </script>
@@ -756,7 +744,19 @@ class RobotManagerNode(Node):
         env['ROS_LOCALHOST_ONLY'] = '1'
         save_success = False
 
-        # Attempt 1: Native SLAM Toolbox save service (fastest, most reliable directly from SLAM memory)
+        # Attempt 1: Native SLAM Toolbox serialize_map (saves full pose graph .data/.posegraph for live reload)
+        try:
+            res_ser = subprocess.run(
+                ["ros2", "service", "call", "/slam_toolbox/serialize_map",
+                 "slam_toolbox/srv/SerializePoseGraph", f"{{filename: '/root/{clean_room}_map'}}"],
+                capture_output=True, text=True, env=env, timeout=15
+            )
+            if res_ser.returncode == 0:
+                _log(f"[SUCCESS] SLAM Toolbox serialized posegraph to /root/{clean_room}_map.posegraph")
+        except Exception as e:
+            _log(f"[DEBUG] SLAM Toolbox serialize service skipped: {e}")
+
+        # Attempt 2: Native SLAM Toolbox save service (saves .pgm and .yaml for Nav2 and Web viewer)
         try:
             res = subprocess.run(
                 ["ros2", "service", "call", "/slam_toolbox/save_map",
@@ -768,6 +768,7 @@ class RobotManagerNode(Node):
                 save_success = True
         except Exception as e:
             _log(f"[DEBUG] SLAM Toolbox service save skipped: {e}")
+
 
         # Attempt 2: Fallback to nav2_map_server map_saver_cli with timeout allowance
         if not save_success:
@@ -848,23 +849,55 @@ def _handle_command(node, payload):
         sys.exit(0)
 
     elif cmd == 6:
-        # Switch mode / Set active map
+        # Load saved map directly into active SLAM Toolbox without restarting container
         map_name = _sanitize_name(str(payload.get('map_name', '')).strip())
-        mode = payload.get('mode', 'localization')
-        if not map_name and mode == 'localization':
+        if not map_name:
             _log("[ERROR] No map name specified.")
             return
-        
-        cfg_path = "/root/default_mode.txt"
+
+        import subprocess
+        env = os.environ.copy()
+        env['ROS_LOCALHOST_ONLY'] = '1'
+
+        _log(f"[LOAD] Loading map '{map_name}' into SLAM Toolbox live (zero restart)...")
+        # 1. Check if serialized posegraph exists; if not, slam_toolbox can't reload posegraph directly
+        ser_file = f"/root/{map_name}_map.posegraph"
+        ser_base = f"/root/{map_name}_map"
+        loaded = False
+        if os.path.exists(ser_file) or os.path.exists(f"{ser_base}.data"):
+            try:
+                res = subprocess.run(
+                    ["ros2", "service", "call", "/slam_toolbox/deserialize_map",
+                     "slam_toolbox/srv/DeserializePoseGraph",
+                     f"{{filename: '{ser_base}', match_type: 1}}"],
+                    capture_output=True, text=True, env=env, timeout=15
+                )
+                if res.returncode == 0 and ("result=0" in res.stdout or "success" in res.stdout.lower()):
+                    _log(f"[SUCCESS] SLAM Toolbox loaded '{map_name}' posegraph live! Robot localized.")
+                    loaded = True
+            except Exception as e:
+                _log(f"[WARN] deserialize_map service failed: {e}")
+
+        # 2. Load checkpoints into node memory
+        cp_file = f"/root/{map_name}_checkpoints.json"
+        if os.path.isfile(cp_file):
+            try:
+                with open(cp_file) as f:
+                    node.checkpoints = json.load(f)
+                _log(f"[SUCCESS] {len(node.checkpoints)} checkpoints loaded from '{map_name}'. Ready to navigate!")
+            except Exception as e:
+                _log(f"[ERROR] Failed to load checkpoints: {e}")
+        else:
+            _log(f"[WARN] No checkpoints file found at {cp_file}")
+
+        # Also persist to default_mode.txt so if container ever does reboot, it retains this map
         try:
-            with open(cfg_path, 'w') as f:
-                f.write(f'export NAV_MODE="{mode}"\n')
-                if map_name:
-                    f.write(f'export ACTIVE_MAP="{map_name}"\n')
-            _log(f"[CONFIG] Mode set to: {mode} (Map: {map_name or 'None'})")
-            _log("[RESTART] To apply this map across all ROS nodes, run on Jetson terminal: sudo docker compose restart")
-        except Exception as e:
-            _log(f"[ERROR] Failed to save mode config: {e}")
+            with open("/root/default_mode.txt", 'w') as f:
+                f.write(f'export NAV_MODE="mapping"\n')
+                f.write(f'export ACTIVE_MAP="{map_name}"\n')
+        except Exception:
+            pass
+
 
     elif cmd == 7:
         # Set Initial Pose for AMCL
