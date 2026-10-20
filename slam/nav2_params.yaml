@@ -43,7 +43,7 @@ controller_server:
       stateful: True
       plugin: "nav2_controller::SimpleGoalChecker"
       xy_goal_tolerance: 0.30
-      yaw_goal_tolerance: 0.50
+      yaw_goal_tolerance: 3.14159   # Accepts arrival from any heading without requiring spinning in place
 
     FollowPath:
       plugin: "dwb_core::DWBLocalPlanner"
