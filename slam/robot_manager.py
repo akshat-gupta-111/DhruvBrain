@@ -542,6 +542,7 @@ class RobotManagerNode(Node):
             return
             
         _log(f"[NAV] Sending goal to checkpoint '{checkpoint_name}' at ({pt['x']:.2f}, {pt['y']:.2f})")
+        self._current_goal_pt = pt
         goal = NavigateToPose.Goal()
         goal.pose.header.frame_id = 'map'
         goal.pose.header.stamp = self.get_clock().now().to_msg()
@@ -560,11 +561,29 @@ class RobotManagerNode(Node):
         fb = feedback_msg.feedback
         eta = fb.estimated_time_remaining
         eta_sec = eta.sec + eta.nanosec * 1e-9
-        dist = getattr(fb, 'distance_remaining', None)
+        path_dist = getattr(fb, 'distance_remaining', None)
         
+        # Calculate real-time physical Euclidean distance to goal using active TF
+        euclidean_dist = None
+        if hasattr(self, '_current_goal_pt') and self._current_goal_pt:
+            try:
+                t = self.tf_buffer.lookup_transform('map', 'base_link', rclpy.time.Time())
+                import math
+                dx = self._current_goal_pt['x'] - t.transform.translation.x
+                dy = self._current_goal_pt['y'] - t.transform.translation.y
+                euclidean_dist = math.hypot(dx, dy)
+            except Exception:
+                pass
+
         now = time.time()
         if now - self._last_eta_log > 2.0:
-            dist_str = f" | Dist left: {dist:.2f}m" if dist is not None else ""
+            if euclidean_dist is not None:
+                dist_str = f" | Dist to goal: {euclidean_dist:.2f}m"
+            elif path_dist is not None:
+                dist_str = f" | Dist left: {path_dist:.2f}m"
+            else:
+                dist_str = ""
+
             if eta_sec > 0:
                 _log(f"[NAV] ETA: {eta_sec:.1f}s{dist_str}")
             else:
