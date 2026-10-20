@@ -145,15 +145,32 @@ echo "      Allowing RF2O 8 s to initialise..."
 sleep 8
 
 # -----------------------------------------------------------------------------
-# STEP 4 — SLAM Toolbox  (needs /scan + /odom)
+# STEP 4 — Mapping (SLAM Toolbox) OR Localization (AMCL + Map Server)
 # -----------------------------------------------------------------------------
-echo "[4/6] Starting SLAM Toolbox (online async)..."
-ros2 launch slam_toolbox online_async_launch.py use_sim_time:=false >/tmp/slam.log 2>&1 &
-SLAM_PID=$!
+NAV_MODE=${NAV_MODE:-"mapping"}
+ACTIVE_MAP=${ACTIVE_MAP:-""}
 
-# SLAM toolbox takes ~5-10 s to initialise Ceres solver
-echo "      Allowing SLAM Toolbox 10 s to initialise..."
-sleep 10
+# If NAV_MODE is not explicitly set, but /root/default_mode.txt exists, read it
+if [ -f /root/default_mode.txt ]; then
+    source /root/default_mode.txt
+fi
+
+if [ "$NAV_MODE" = "localization" ] && [ -n "$ACTIVE_MAP" ] && [ -f "/root/${ACTIVE_MAP}_map.yaml" ]; then
+    echo "[4/6] Starting Localization on saved map '${ACTIVE_MAP}' (AMCL + map_server)..."
+    ros2 launch nav2_bringup localization_launch.py \
+        map:="/root/${ACTIVE_MAP}_map.yaml" \
+        use_sim_time:=false \
+        params_file:="$NAV2_PARAMS" >/tmp/localization.log 2>&1 &
+    SLAM_PID=$!
+    echo "      Allowing Localization 8 s to initialise..."
+    sleep 8
+else
+    echo "[4/6] Starting SLAM Toolbox (online async mapping mode)..."
+    ros2 launch slam_toolbox online_async_launch.py use_sim_time:=false >/tmp/slam.log 2>&1 &
+    SLAM_PID=$!
+    echo "      Allowing SLAM Toolbox 10 s to initialise..."
+    sleep 10
+fi
 
 # -----------------------------------------------------------------------------
 # STEP 5 — ROS-Arduino Bridge (translates /cmd_vel → <MIX> serial commands)
@@ -169,7 +186,7 @@ BRIDGE_PID=$!
 sleep 2
 
 # -----------------------------------------------------------------------------
-# STEP 6 — Nav2 Navigation Stack (needs /map + TF chain from SLAM Toolbox)
+# STEP 6 — Nav2 Navigation Stack (needs /map + TF chain)
 # -----------------------------------------------------------------------------
 echo "[6/6] Starting Nav2 Navigation Stack..."
 NAV2_PARAMS="/workspace/nav2_params.yaml"

@@ -17,7 +17,7 @@ import rclpy
 from rclpy.node import Node
 from nav_msgs.msg import OccupancyGrid, Odometry
 from sensor_msgs.msg import LaserScan
-from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped
 from tf2_ros import Buffer, TransformListener
 from nav2_msgs.action import NavigateToPose
 from rclpy.action import ActionClient
@@ -113,6 +113,20 @@ class MapWebServer(BaseHTTPRequestHandler):
                 count = map_received_count
 
             saved = _list_saved_maps()
+            # Read current active config if set
+            current_active_mode = "mapping"
+            current_active_map = ""
+            if os.path.isfile("/root/default_mode.txt"):
+                try:
+                    with open("/root/default_mode.txt") as cf:
+                        for cl in cf:
+                            if "NAV_MODE=" in cl:
+                                current_active_mode = cl.split("=")[1].replace('"', '').strip()
+                            if "ACTIVE_MAP=" in cl:
+                                current_active_map = cl.split("=")[1].replace('"', '').strip()
+                except Exception:
+                    pass
+
             if saved:
                 dl_rows = ''
                 for map_name, files in sorted(saved.items()):
@@ -122,17 +136,27 @@ class MapWebServer(BaseHTTPRequestHandler):
                     btn_json = f'<a class="btn" href="/download?file={esc_name}_checkpoints.json">&#11123; .json</a>' if files.get('json') else '<span class="btn disabled">.json</span>'
                     has_all  = files.get('pgm') and files.get('yaml') and files.get('json')
                     btn_anno = f'<a class="btn" href="/annotated.png?map={esc_name}">&#128444; Annotated</a>' if has_all else '<span class="btn disabled">Annotated</span>'
-                    dl_rows += f'<tr><td class="mapname">{esc_name}</td><td>{btn_pgm}</td><td>{btn_yaml}</td><td>{btn_json}</td><td>{btn_anno}</td></tr>'
+                    
+                    is_active = (current_active_mode == "localization" and current_active_map == map_name)
+                    btn_load = f'<span class="badge-ok" style="margin:0">Active Map</span>' if is_active else f'<button class="btn" style="background:#7b2cbf;cursor:pointer;border:none" onclick="loadMapMode(\'{esc_name}\')">&#128640; Use Map</button>'
+                    
+                    dl_rows += f'<tr><td class="mapname">{esc_name}</td><td>{btn_load}</td><td>{btn_pgm}</td><td>{btn_yaml}</td><td>{btn_json}</td><td>{btn_anno}</td></tr>'
+                
+                mode_bar = f'<div style="margin-bottom:8px;font-size:0.82rem;color:#7ecfef">Current Stack: <b>{current_active_mode.upper()}</b> {("(" + current_active_map + ")") if current_active_map else ""}</div>'
+                reset_btn = '<button class="btn" style="background:#d90429;border:none;cursor:pointer;margin-top:6px" onclick="resetMappingMode()">&#128260; Reset to New Mapping Mode</button>'
                 downloads_html = f"""
   <div class="card">
-    <h2>&#128190; Saved Maps</h2>
+    <h2>&#128190; Saved Maps &amp; Localization</h2>
+    {mode_bar}
     <table>
-      <thead><tr><th>Map Name</th><th>.pgm</th><th>.yaml</th><th>.json</th><th>Annotated</th></tr></thead>
+      <thead><tr><th>Map Name</th><th>Action</th><th>.pgm</th><th>.yaml</th><th>.json</th><th>Annotated</th></tr></thead>
       <tbody>{dl_rows}</tbody>
     </table>
+    {reset_btn}
   </div>"""
             else:
                 downloads_html = '<div class="card"><p style="color:#555">No saved maps yet. Use the Save Map button.</p></div>'
+
 
             map_opts = '<option value="LIVE">Live Map (Current Session)</option>'
             for m in sorted(saved.keys()):
@@ -336,6 +360,22 @@ class MapWebServer(BaseHTTPRequestHandler):
       post({{cmd: 4, map_name: m, checkpoint: cp}});
       hideModal('m-nav');
     }}
+
+    function loadMapMode(mapName) {{
+      if(!confirm('Switch system to Localization Mode on saved map \"' + mapName + '\"?\\n\\nThis will configure ROS to localize against ' + mapName + ' and Nav2 to navigate to its saved checkpoints.')) return;
+      post({{cmd: 6, map_name: mapName, mode: 'localization'}}).then(() => {{
+        alert('Configuration saved for map \"' + mapName + '\".\\n\\nPlease run on Jetson terminal:\\nsudo docker compose restart\\n\\nAfter restart, the saved map will load permanently with full AMCL localization!');
+        setTimeout(() => location.reload(), 1500);
+      }});
+    }}
+
+    function resetMappingMode() {{
+      if(!confirm('Switch back to SLAM Mapping Mode?\\n\\nThis resets the robot to explore and map new environments.')) return;
+      post({{cmd: 6, map_name: '', mode: 'mapping'}}).then(() => {{
+        alert('Set to SLAM Mapping mode.\\n\\nPlease run on Jetson terminal:\\nsudo docker compose restart');
+        setTimeout(() => location.reload(), 1500);
+      }});
+    }}
   </script>
 </body>
 </html>"""
@@ -523,8 +563,45 @@ class RobotManagerNode(Node):
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
         self.checkpoints = {}
+        # If in localization mode with an active map, auto-load its saved checkpoints
+        if os.path.isfile('/root/default_mode.txt'):
+            try:
+                active_m = ''
+                with open('/root/default_mode.txt') as f:
+                    for line in f:
+                        if 'ACTIVE_MAP=' in line:
+                            active_m = line.split('=')[1].replace('"', '').strip()
+                if active_m:
+                    cp_path = f'/root/{active_m}_checkpoints.json'
+                    if os.path.isfile(cp_path):
+                        with open(cp_path) as jf:
+                            self.checkpoints = json.load(jf)
+                        _log(f"[INIT] Loaded {len(self.checkpoints)} checkpoints from saved map '{active_m}'")
+            except Exception as e:
+                _log(f"[WARN] Failed to auto-load checkpoints: {e}")
+
         self.nav_client = ActionClient(self, NavigateToPose, 'navigate_to_pose')
+        self.initial_pose_pub = self.create_publisher(PoseWithCovarianceStamped, '/initialpose', 10)
         self._last_eta_log = 0.0
+
+    def set_initial_pose(self, x=0.0, y=0.0, yaw=0.0):
+        import math
+        msg = PoseWithCovarianceStamped()
+        msg.header.frame_id = 'map'
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.pose.pose.position.x = float(x)
+        msg.pose.pose.position.y = float(y)
+        msg.pose.pose.position.z = 0.0
+        # Convert yaw to quaternion
+        msg.pose.pose.orientation.z = math.sin(yaw / 2.0)
+        msg.pose.pose.orientation.w = math.cos(yaw / 2.0)
+        # Covariance diagonal: 0.25m position variance, ~0.06 rad yaw variance
+        msg.pose.covariance[0] = 0.25
+        msg.pose.covariance[7] = 0.25
+        msg.pose.covariance[35] = 0.0685
+        self.initial_pose_pub.publish(msg)
+        _log(f"[POSE] Initialized robot pose at ({x:.2f}, {y:.2f}) on map.")
+
 
     def scan_callback(self, msg):
         global latest_scan_time
@@ -770,6 +847,32 @@ def _handle_command(node, payload):
         rclpy.shutdown()
         sys.exit(0)
 
+    elif cmd == 6:
+        # Switch mode / Set active map
+        map_name = _sanitize_name(str(payload.get('map_name', '')).strip())
+        mode = payload.get('mode', 'localization')
+        if not map_name and mode == 'localization':
+            _log("[ERROR] No map name specified.")
+            return
+        
+        cfg_path = "/root/default_mode.txt"
+        try:
+            with open(cfg_path, 'w') as f:
+                f.write(f'export NAV_MODE="{mode}"\n')
+                if map_name:
+                    f.write(f'export ACTIVE_MAP="{map_name}"\n')
+            _log(f"[CONFIG] Mode set to: {mode} (Map: {map_name or 'None'})")
+            _log("[RESTART] To apply this map across all ROS nodes, run on Jetson terminal: sudo docker compose restart")
+        except Exception as e:
+            _log(f"[ERROR] Failed to save mode config: {e}")
+
+    elif cmd == 7:
+        # Set Initial Pose for AMCL
+        x = float(payload.get('x', 0.0))
+        y = float(payload.get('y', 0.0))
+        yaw = float(payload.get('yaw', 0.0))
+        node.set_initial_pose(x, y, yaw)
+
 # ── Entry Point ───────────────────────────────────────────────────────────────
 
 def interactive_menu():
@@ -784,8 +887,9 @@ def interactive_menu():
     _log("==========================================")
     _log("  DHRUV SLAM — Control Panel")
     _log("  Web UI: http://localhost:8000")
-    _log("  Terminal: 1 | 2:name | 3:mapname | 4:map,checkpoint | 5=exit")
+    _log("  Terminal: 1 | 2:name | 3:mapname | 4:map,checkpoint | 6:mapname (load) | 7:x,y | 5=exit")
     _log("==========================================")
+
 
     # Background thread for terminal input
     def _terminal():
@@ -805,6 +909,14 @@ def interactive_menu():
                     elif c == 4:
                         m, cp = (arg.split(',', 1) + [''])[:2]
                         cmd_queue.put({'cmd': 4, 'map_name': m.strip(), 'checkpoint': cp.strip()})
+                    elif c == 6:
+                        cmd_queue.put({'cmd': 6, 'map_name': arg.strip(), 'mode': 'localization'})
+                    elif c == 7:
+                        coords = arg.split(',')
+                        x = float(coords[0].strip()) if len(coords) > 0 else 0.0
+                        y = float(coords[1].strip()) if len(coords) > 1 else 0.0
+                        yaw = float(coords[2].strip()) if len(coords) > 2 else 0.0
+                        cmd_queue.put({'cmd': 7, 'x': x, 'y': y, 'yaw': yaw})
                 else:
                     cmd_queue.put({'cmd': int(line)})
             except (ValueError, EOFError):
