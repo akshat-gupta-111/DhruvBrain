@@ -138,12 +138,19 @@ class MapWebServer(BaseHTTPRequestHandler):
                     btn_anno = f'<a class="btn" href="/annotated.png?map={esc_name}">&#128444; Annotated</a>' if has_all else '<span class="btn disabled">Annotated</span>'
                     
                     is_active = (current_active_map == map_name)
-                    btn_load = f'<span class="badge-ok" style="margin:0">Active</span>' if is_active else f'<button class="btn" style="background:#7b2cbf;cursor:pointer;border:none" onclick="loadMapMode(\'{esc_name}\')">&#128640; Load Map</button>'
+                    if is_active:
+                        btn_load = f'<span class="badge-ok" style="margin:0">Active</span> <button class="btn" style="background:#555;cursor:pointer;border:none;margin-left:4px" onclick="deselectMap()">&#10005; Deselect</button>'
+                    else:
+                        btn_load = f'<button class="btn" style="background:#7b2cbf;cursor:pointer;border:none" onclick="loadMapMode(\'{esc_name}\')">&#128640; Load Map</button>'
                     btn_del  = f'<button class="btn" style="background:#b7094c;cursor:pointer;border:none" onclick="deleteMap(\'{esc_name}\')">&#128465; Delete</button>'
                     
                     dl_rows += f'<tr><td class="mapname">{esc_name}</td><td>{btn_load}</td><td>{btn_pgm}</td><td>{btn_yaml}</td><td>{btn_json}</td><td>{btn_anno}</td><td>{btn_del}</td></tr>'
                 
-                active_str = f'<div style="margin-bottom:8px;font-size:0.82rem;color:#7ecfef">Active Map: <b>{current_active_map if current_active_map else "Live Session"}</b></div>'
+                if current_active_map:
+                    active_str = f'<div style="margin-bottom:8px;font-size:0.82rem;color:#7ecfef;display:flex;align-items:center;gap:8px"><span>Active Map: <b>{current_active_map}</b></span> <button class="btn" style="background:#444;cursor:pointer;border:none" onclick="deselectMap()">&#10005; Deselect Map (Live Mode)</button></div>'
+                else:
+                    active_str = f'<div style="margin-bottom:8px;font-size:0.82rem;color:#7ecfef">Active Map: <b>Live Session (Dynamic SLAM)</b></div>'
+                
                 downloads_html = f"""
   <div class="card">
     <h2>&#128190; Saved Maps</h2>
@@ -363,6 +370,12 @@ class MapWebServer(BaseHTTPRequestHandler):
     function loadMapMode(mapName) {{
       post({{cmd: 6, map_name: mapName}}).then(() => {{
         setTimeout(() => location.reload(), 1200);
+      }});
+    }}
+
+    function deselectMap() {{
+      post({{cmd: 6, map_name: 'LIVE'}}).then(() => {{
+        setTimeout(() => location.reload(), 800);
       }});
     }}
 
@@ -859,8 +872,18 @@ def _handle_command(node, payload):
     elif cmd == 6:
         # Load saved map directly into active SLAM Toolbox without restarting container
         map_name = _sanitize_name(str(payload.get('map_name', '')).strip())
-        if not map_name:
-            _log("[ERROR] No map name specified.")
+        
+        # Deselect / Unload active map
+        if not map_name or map_name == 'LIVE':
+            _log("[MAP] Deselecting map — returning to Live Session.")
+            node.checkpoints = {}
+            try:
+                if os.path.isfile("/root/default_mode.txt"):
+                    with open("/root/default_mode.txt", 'w') as f:
+                        f.write('export NAV_MODE="mapping"\nexport ACTIVE_MAP=""\n')
+            except Exception:
+                pass
+            _log("[SUCCESS] Map deselected. Active map set to Live Session.")
             return
 
         import subprocess
@@ -905,6 +928,7 @@ def _handle_command(node, payload):
                 f.write(f'export ACTIVE_MAP="{map_name}"\n')
         except Exception:
             pass
+
 
 
     elif cmd == 7:
