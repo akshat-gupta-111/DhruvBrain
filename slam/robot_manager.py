@@ -659,20 +659,36 @@ class RobotManagerNode(Node):
         env = os.environ.copy()
         env['ROS_LOCALHOST_ONLY'] = '1'
         save_success = False
+
+        # Attempt 1: Native SLAM Toolbox save service (fastest, most reliable directly from SLAM memory)
         try:
-            subprocess.run(
-                ["ros2", "run", "nav2_map_server", "map_saver_cli",
-                 "-f", f"/root/{clean_room}_map",
-                 "--ros-args", "-p", "map_subscribe_transient_local:=true",
-                 "-p", "use_sim_time:=false"],
-                check=True, env=env, timeout=30
+            res = subprocess.run(
+                ["ros2", "service", "call", "/slam_toolbox/save_map",
+                 "slam_toolbox/srv/SaveMap", f"{{name: {{data: '/root/{clean_room}_map'}}}}"],
+                capture_output=True, text=True, env=env, timeout=15
             )
-            _log(f"[SUCCESS] Map grid saved to /root/{clean_room}_map.pgm")
-            save_success = True
-        except subprocess.CalledProcessError as e:
-            _log(f"[ERROR] map_saver_cli failed (code {e.returncode}).")
-        except subprocess.TimeoutExpired:
-            _log("[ERROR] map_saver_cli timed out.")
+            if res.returncode == 0 and ("result=0" in res.stdout or "success" in res.stdout.lower() or os.path.exists(f"/root/{clean_room}_map.yaml")):
+                _log(f"[SUCCESS] SLAM Toolbox saved map grid to /root/{clean_room}_map.pgm")
+                save_success = True
+        except Exception as e:
+            _log(f"[DEBUG] SLAM Toolbox service save skipped: {e}")
+
+        # Attempt 2: Fallback to nav2_map_server map_saver_cli with timeout allowance
+        if not save_success:
+            try:
+                subprocess.run(
+                    ["ros2", "run", "nav2_map_server", "map_saver_cli",
+                     "-f", f"/root/{clean_room}_map",
+                     "--ros-args", "-p", "map_subscribe_transient_local:=true",
+                     "-p", "use_sim_time:=false"],
+                    check=True, env=env, timeout=15
+                )
+                _log(f"[SUCCESS] Map grid saved to /root/{clean_room}_map.pgm")
+                save_success = True
+            except subprocess.CalledProcessError as e:
+                _log(f"[ERROR] map_saver_cli failed (code {e.returncode}).")
+            except subprocess.TimeoutExpired:
+                _log("[ERROR] map_saver_cli timed out.")
 
         # ONLY save checkpoints metadata if map saver succeeded to avoid orphaned or mismatched files
         if save_success:
