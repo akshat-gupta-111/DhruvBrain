@@ -689,78 +689,70 @@ class RobotManagerNode(Node):
             return None
 
     def _bearing_loop(self):
-        """
-        10Hz loop. Computes Vx/Vy/W toward the current bearing goal
-        and publishes as Twist on /cmd_vel.
-        Stops publishing when arrived or when bearing_active is False.
-        """
         if not self.bearing_active or self.bearing_goal is None:
-            return
-
-        now = time.time()
-
-        # Check navigation timeout
-        if (now - self.nav_start_time) > self.MAX_NAV_TIME:
-            self.abort_goal(f"Navigation timed out after {self.MAX_NAV_TIME:.0f}s")
             return
 
         pose = self._get_robot_pose()
         if pose is None:
-            # If TF is missing for more than 10 seconds during active navigation, abort
-            if (now - self._last_tf_seen) > 10.0:
-                self.abort_goal("Lost map->base_link TF transform for >10s")
-            return   # TF not ready yet — wait silently
-
-        self._last_tf_seen = now
+            return
 
         rx, ry, rtheta = pose
         gx, gy         = self.bearing_goal
 
-        dx       = gx - rx
-        dy       = gy - ry
-        distance = math.sqrt(dx**2 + dy**2)
+        dx   = gx - rx
+        dy   = gy - ry
+        dist = math.sqrt(dx**2 + dy**2)
 
-        # Check if arrived within 15-20cm error-concession perimeter (0.20m)
-        if distance <= self.ARRIVAL_THRESH:
+        # Arrived
+        if dist < self.ARRIVAL_THRESH:
             self.cmd_vel_pub.publish(Twist())
             self.bearing_active = False
-            cp = self.bearing_goal_name or "checkpoint"
             self.bearing_goal   = None
-            self.bearing_goal_name = None
-            msg = f"[NAV] ✅ REACHED CHECKPOINT '{cp}'! Final distance: {distance:.2f}m (Within {self.ARRIVAL_THRESH*100:.0f}cm perimeter). Task SUCCEEDED."
-            self.get_logger().info(msg)
-            _log(msg)
+            self.get_logger().info('[Bearing] Goal reached.')
             return
 
-        # Angle from robot to goal in map frame
-        bearing = math.atan2(dy, dx)
+        # Normalize goal vector in map frame
+        dx_n = dx / dist
+        dy_n = dy / dist
 
-        # Heading error — how far off are we from pointing at the goal
-        heading_error = bearing - rtheta
-        # Normalise to [-π, π]
-        heading_error = math.atan2(
-            math.sin(heading_error),
-            math.cos(heading_error)
+        # --- ROTATION MATRIX ---
+        # Rotate map-frame goal vector into robot body frame.
+        # This ALWAYS points directly at the goal regardless of
+        # which way the robot is facing. No coupling to W.
+        cos_t = math.cos(rtheta)
+        sin_t = math.sin(rtheta)
+        vx_raw =  (dx_n * cos_t + dy_n * sin_t) * self.BASE_SPEED
+        vy_raw =  (-dx_n * sin_t + dy_n * cos_t) * self.BASE_SPEED
+
+        # --- INDEPENDENT HEADING CORRECTION ---
+        # Separate from translation — only gently rotates robot
+        # to face the goal. Does NOT affect Vx/Vy.
+        desired_heading = math.atan2(dy, dx)
+        heading_error   = math.atan2(
+            math.sin(desired_heading - rtheta),
+            math.cos(desired_heading - rtheta)
         )
+        w_raw = self.KP_W * heading_error
 
-        # Print distance on Jetson terminal and live log every 0.5s
-        if now - self._last_dist_log_time >= 0.5:
-            self._last_dist_log_time = now
-            cp = self.bearing_goal_name or "checkpoint"
-            _log(f"[NAV] Target: '{cp}' | Distance: {distance:.2f}m (Perimeter: {self.ARRIVAL_THRESH*100:.0f}cm) | Heading err: {math.degrees(heading_error):+.1f}°")
+        # --- APPROACH SLOW-DOWN ---
+        # Scale speed down linearly inside 0.5m to prevent
+        # overshooting and oscillating past the goal.
+        if dist < 0.5:
+            scale  = dist / 0.5
+            vx_raw *= scale
+            vy_raw *= scale
 
-        # Decompose into robot-body frame (holonomic Mecanum)
-        vx_raw = math.cos(heading_error) * self.BASE_SPEED
-        vy_raw = math.sin(heading_error) * self.BASE_SPEED
-        w_raw  = self.KP_W * heading_error
+        # Clamp all values
+        vx_raw = max(-self.BASE_SPEED, min(self.BASE_SPEED, vx_raw))
+        vy_raw = max(-self.BASE_SPEED, min(self.BASE_SPEED, vy_raw))
+        w_raw  = max(-self.KP_W,       min(self.KP_W,       w_raw))
 
-        # Scale into m/s for Twist — bridge maps 0.5 m/s → PWM 175
-        # BASE_SPEED 120 PWM → (120-70)/(175-70) * 0.5 ≈ 0.24 m/s
+        # Scale to Twist (m/s) — bridge maps 0.5 m/s → PWM 175
         SCALE = 0.5 / 175.0
         twist = Twist()
-        twist.linear.x  = float(max(-175, min(175, vx_raw))) * SCALE
-        twist.linear.y  = float(max(-175, min(175, vy_raw))) * SCALE
-        twist.angular.z = float(max(-1.0, min(1.0, w_raw * SCALE)))
+        twist.linear.x  = float(vx_raw) * SCALE
+        twist.linear.y  = float(vy_raw) * SCALE
+        twist.angular.z = float(w_raw)  * SCALE
 
         self.cmd_vel_pub.publish(twist)
 
