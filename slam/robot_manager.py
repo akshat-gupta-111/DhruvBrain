@@ -58,7 +58,7 @@ _MIME = {
 
 def _log(msg: str):
     """Print to stdout AND append to the web live-log panel."""
-    print(msg)
+    print(msg, flush=True)
     ts = time.strftime('%H:%M:%S')
     with _log_lock:
         _log_lines.append(f"[{ts}] {msg}")
@@ -604,10 +604,15 @@ class RobotManagerNode(Node):
 
         # Bearing controller state
         self.bearing_goal      = None   # (goal_x, goal_y) in map frame, or None
+        self.bearing_goal_name = None   # Name of active checkpoint
         self.bearing_active    = False
-        self.ARRIVAL_THRESH    = 0.20   # metres — stop when within 20cm of goal
+        self.ARRIVAL_THRESH    = 0.20   # metres — 20cm perimeter (15-20cm) to concede position error
         self.BASE_SPEED        = 120    # PWM base (maps to m/s inside bridge)
         self.KP_W              = 60     # proportional gain for heading correction
+        self.MAX_NAV_TIME      = 90.0   # seconds — auto-abort timeout if navigation stalls
+        self.nav_start_time    = 0.0
+        self._last_dist_log_time = 0.0
+        self._last_tf_seen     = 0.0
 
         # 10Hz control loop timer
         self.bearing_timer = self.create_timer(0.1, self._bearing_loop)
@@ -692,9 +697,21 @@ class RobotManagerNode(Node):
         if not self.bearing_active or self.bearing_goal is None:
             return
 
+        now = time.time()
+
+        # Check navigation timeout
+        if (now - self.nav_start_time) > self.MAX_NAV_TIME:
+            self.abort_goal(f"Navigation timed out after {self.MAX_NAV_TIME:.0f}s")
+            return
+
         pose = self._get_robot_pose()
         if pose is None:
+            # If TF is missing for more than 10 seconds during active navigation, abort
+            if (now - self._last_tf_seen) > 10.0:
+                self.abort_goal("Lost map->base_link TF transform for >10s")
             return   # TF not ready yet — wait silently
+
+        self._last_tf_seen = now
 
         rx, ry, rtheta = pose
         gx, gy         = self.bearing_goal
@@ -703,13 +720,16 @@ class RobotManagerNode(Node):
         dy       = gy - ry
         distance = math.sqrt(dx**2 + dy**2)
 
-        if distance < self.ARRIVAL_THRESH:
-            # Arrived — stop motors and disarm controller
+        # Check if arrived within 15-20cm error-concession perimeter (0.20m)
+        if distance <= self.ARRIVAL_THRESH:
             self.cmd_vel_pub.publish(Twist())
             self.bearing_active = False
+            cp = self.bearing_goal_name or "checkpoint"
             self.bearing_goal   = None
-            self.get_logger().info('[Bearing] Goal reached. Stopped.')
-            _log('[Bearing] Goal reached. Stopped.')
+            self.bearing_goal_name = None
+            msg = f"[NAV] ✅ REACHED CHECKPOINT '{cp}'! Final distance: {distance:.2f}m (Within {self.ARRIVAL_THRESH*100:.0f}cm perimeter). Task SUCCEEDED."
+            self.get_logger().info(msg)
+            _log(msg)
             return
 
         # Angle from robot to goal in map frame
@@ -722,6 +742,12 @@ class RobotManagerNode(Node):
             math.sin(heading_error),
             math.cos(heading_error)
         )
+
+        # Print distance on Jetson terminal and live log every 0.5s
+        if now - self._last_dist_log_time >= 0.5:
+            self._last_dist_log_time = now
+            cp = self.bearing_goal_name or "checkpoint"
+            _log(f"[NAV] Target: '{cp}' | Distance: {distance:.2f}m (Perimeter: {self.ARRIVAL_THRESH*100:.0f}cm) | Heading err: {math.degrees(heading_error):+.1f}°")
 
         # Decompose into robot-body frame (holonomic Mecanum)
         vx_raw = math.cos(heading_error) * self.BASE_SPEED
@@ -738,21 +764,34 @@ class RobotManagerNode(Node):
 
         self.cmd_vel_pub.publish(twist)
 
+    def abort_goal(self, reason="Aborted"):
+        """
+        Aborts active navigation task, logs abort status to terminal and web log,
+        and commands immediate zero velocity.
+        """
+        if self.bearing_active:
+            cp = self.bearing_goal_name or "checkpoint"
+            self.bearing_active = False
+            self.bearing_goal   = None
+            self.bearing_goal_name = None
+            self.cmd_vel_pub.publish(Twist())   # immediate zero-velocity stop
+            msg = f"[NAV] ❌ Task ABORTED for '{cp}': {reason}. Motors stopped."
+            self.get_logger().warn(msg)
+            _log(msg)
+
     def cancel_goal(self):
         """
         Cancels any active bearing goal and immediately commands zero velocity.
         """
-        self.bearing_active = False
-        self.bearing_goal   = None
-        self.cmd_vel_pub.publish(Twist())   # immediate zero-velocity stop
-        self.get_logger().info('[Bearing] Goal cancelled. Stopped.')
-        _log('[Bearing] Goal cancelled. Stopped.')
+        if self.bearing_active:
+            self.abort_goal("Cancelled by user / manual stop")
+        else:
+            self.cmd_vel_pub.publish(Twist())
 
     def send_nav_goal(self, pt, checkpoint_name):
         goal_x = float(pt['x'])
         goal_y = float(pt['y'])
         self._current_goal_pt = pt
-        _log(f"[NAV] Sending goal to checkpoint '{checkpoint_name}' at ({goal_x:.2f}, {goal_y:.2f})")
 
         # Cancel any prior bearing goal cleanly
         if self.bearing_active:
@@ -760,12 +799,16 @@ class RobotManagerNode(Node):
             self.bearing_active = False
 
         # Arm the bearing controller
-        self.bearing_goal   = (goal_x, goal_y)   # use whatever variable
-        self.bearing_active = True                 # names already exist here
-        self.get_logger().info(
-            f'[Bearing] New goal: ({goal_x:.2f}, {goal_y:.2f})'
-        )
-        _log(f'[Bearing] New goal: ({goal_x:.2f}, {goal_y:.2f})')
+        self.bearing_goal      = (goal_x, goal_y)
+        self.bearing_goal_name = checkpoint_name
+        self.bearing_active    = True
+        self.nav_start_time    = time.time()
+        self._last_dist_log_time = 0.0
+        self._last_tf_seen     = time.time()
+
+        _log(f"[NAV] 🚀 Starting navigation to checkpoint '{checkpoint_name}' at ({goal_x:.2f}, {goal_y:.2f})")
+        _log(f"[NAV] Target perimeter set to {self.ARRIVAL_THRESH*100:.0f}cm for position error tolerance.")
+        self.get_logger().info(f'[Bearing] New goal: ({goal_x:.2f}, {goal_y:.2f}) - {checkpoint_name}')
 
     def _nav_feedback_cb(self, feedback_msg):
         fb = feedback_msg.feedback
