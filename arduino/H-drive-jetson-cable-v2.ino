@@ -320,22 +320,8 @@ void handleIncomingSerial(String line)
   // 3. Mirror the received command over BLE so phone/dashboard sees it in terminal!
   logOut("RX[CABLE]: " + line);
 
-  // 4. Arbitration Check:
-  //    If is_autonomous is FALSE, Jetson cable commands are dropped (unless STOP)
-  if (!is_autonomous)
-  {
-    String check = line;
-    check.toUpperCase();
-    bool isStop = (check.indexOf("STOP") != -1 || check.indexOf("HALT") != -1 || check == "Q" || check == "X");
-
-    if (!isStop)
-    {
-      logOut("[BLOCKED] Cable command dropped. MANUAL (Dashboard) mode is currently active!");
-      return;
-    }
-  }
-
-  // 5. Parse and execute the command
+  // 4. Always execute — USB cable commands from Jetson/Nav2 are always trusted.
+  //    No arbitration blocking here. BLE and cable can coexist safely.
   parseAndExecuteCommand(line, "CABLE");
 }
 
