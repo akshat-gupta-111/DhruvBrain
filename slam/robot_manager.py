@@ -7,6 +7,7 @@ import time
 import html
 import threading
 import queue
+import math
 from io import BytesIO
 import yaml
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -14,11 +15,13 @@ from urllib.parse import urlparse, parse_qs
 from PIL import Image, ImageDraw, ImageFont
 
 import rclpy
+import rclpy.duration
 from rclpy.node import Node
 from nav_msgs.msg import OccupancyGrid, Odometry
 from sensor_msgs.msg import LaserScan
-from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped
+from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, Twist
 from tf2_ros import Buffer, TransformListener
+from tf2_ros import LookupException, ConnectivityException, ExtrapolationException
 from nav2_msgs.action import NavigateToPose
 from rclpy.action import ActionClient
 from rclpy.task import Future
@@ -254,6 +257,8 @@ class MapWebServer(BaseHTTPRequestHandler):
             <span class="ic">&#128190;</span>3 &mdash; Save Map<span class="lb">Write .pgm + checkpoints</span></button>
           <button class="cbtn c4" onclick="showModal('m-nav')">
             <span class="ic">&#128663;</span>4 &mdash; Navigate To<span class="lb">Drive to checkpoint</span></button>
+          <button class="cbtn" style="background:#b7094c;color:#fff;grid-column:span 2" onclick="cancelNav()">
+            <span class="ic">&#128721;</span>0 &mdash; Stop / Cancel<span class="lb">Immediate zero stop</span></button>
         </div>
       </div>
     </div>
@@ -385,10 +390,22 @@ class MapWebServer(BaseHTTPRequestHandler):
         setTimeout(() => location.reload(), 800);
       }});
     }}
+
+    function cancelNav() {{
+      fetch('/cancel_goal', {{method: 'POST'}}).then(r => r.json());
+    }}
   </script>
 </body>
 </html>"""
             self._send(200, 'text/html; charset=utf-8', html_page.encode())
+
+        # ── /cancel_goal ──────────────────────────────────────────────────────
+        elif path == '/cancel_goal':
+            if _node_ref is not None:
+                _node_ref.cancel_goal()
+            else:
+                cmd_queue.put({'cmd': 0})
+            self._send(200, 'application/json', json.dumps({'canceled': True, 'status': 'stopped'}).encode())
 
         # ── /map.png ─────────────────────────────────────────────────────────
         elif path == '/map.png':
@@ -534,6 +551,14 @@ class MapWebServer(BaseHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urlparse(self.path)
+        if parsed.path in ('/cancel_goal', '/api/cancel'):
+            if _node_ref is not None:
+                _node_ref.cancel_goal()
+            else:
+                cmd_queue.put({'cmd': 0})
+            self._send(200, 'application/json', json.dumps({'canceled': True, 'status': 'stopped'}).encode())
+            return
+
         if parsed.path != '/api/command':
             self._send(404, 'text/plain', b'Not found'); return
         length = int(self.headers.get('Content-Length', 0))
@@ -542,8 +567,8 @@ class MapWebServer(BaseHTTPRequestHandler):
             payload = json.loads(body)
             if not isinstance(payload, dict):
                 self._send(400, 'application/json', b'{"error":"payload must be a JSON object"}'); return
-            if 'cmd' not in payload or not isinstance(payload['cmd'], int):
-                self._send(400, 'application/json', b'{"error":"missing or invalid cmd field"}'); return
+            if 'cmd' not in payload:
+                self._send(400, 'application/json', b'{"error":"missing cmd field"}'); return
         except Exception:
             self._send(400, 'application/json', b'{"error":"bad json"}'); return
 
@@ -569,8 +594,24 @@ class RobotManagerNode(Node):
         self.map_sub = self.create_subscription(OccupancyGrid, '/map', self.map_callback, 10)
         self.scan_sub = self.create_subscription(LaserScan, '/scan', self.scan_callback, 10)
         self.odom_sub = self.create_subscription(Odometry, '/odom', self.odom_callback, 10)
-        self.tf_buffer = Buffer()
+
+        # /cmd_vel publisher (bearing controller output → cmd_vel_bridge)
+        self.cmd_vel_pub = self.create_publisher(Twist, '/cmd_vel', 10)
+
+        # TF listener — gives us current robot pose from SLAM
+        self.tf_buffer   = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
+
+        # Bearing controller state
+        self.bearing_goal      = None   # (goal_x, goal_y) in map frame, or None
+        self.bearing_active    = False
+        self.ARRIVAL_THRESH    = 0.20   # metres — stop when within 20cm of goal
+        self.BASE_SPEED        = 120    # PWM base (maps to m/s inside bridge)
+        self.KP_W              = 60     # proportional gain for heading correction
+
+        # 10Hz control loop timer
+        self.bearing_timer = self.create_timer(0.1, self._bearing_loop)
+
         self.checkpoints = {}
         # If in localization mode with an active map, auto-load its saved checkpoints
         if os.path.isfile('/root/default_mode.txt'):
@@ -620,28 +661,111 @@ class RobotManagerNode(Node):
         global latest_odom_time
         latest_odom_time = time.time()
 
-    def send_nav_goal(self, pt, checkpoint_name):
-        _log(f"[NAV] Waiting for NavigateToPose action server (up to 15s)...")
-        if not self.nav_client.wait_for_server(timeout_sec=15.0):
-            _log("[ERROR] Nav2 Action Server not available after 15s. Is Nav2 still starting up?")
-            _log("[DEBUG] Check: sudo docker compose logs slam | grep -i nav2")
+    def _get_robot_pose(self):
+        """
+        Returns (x, y, theta) in map frame by looking up map→base_link TF.
+        Returns None if TF is not yet available.
+        """
+        try:
+            t = self.tf_buffer.lookup_transform(
+                'map', 'base_link',
+                rclpy.time.Time(),
+                timeout=rclpy.duration.Duration(seconds=0.1)
+            )
+            tx = t.transform.translation.x
+            ty = t.transform.translation.y
+            q  = t.transform.rotation
+            # Quaternion → yaw (theta)
+            siny_cosp = 2.0 * (q.w * q.z + q.x * q.y)
+            cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
+            theta = math.atan2(siny_cosp, cosy_cosp)
+            return (tx, ty, theta)
+        except (LookupException, ConnectivityException, ExtrapolationException):
+            return None
+
+    def _bearing_loop(self):
+        """
+        10Hz loop. Computes Vx/Vy/W toward the current bearing goal
+        and publishes as Twist on /cmd_vel.
+        Stops publishing when arrived or when bearing_active is False.
+        """
+        if not self.bearing_active or self.bearing_goal is None:
             return
-            
-        _log(f"[NAV] Sending goal to checkpoint '{checkpoint_name}' at ({pt['x']:.2f}, {pt['y']:.2f})")
+
+        pose = self._get_robot_pose()
+        if pose is None:
+            return   # TF not ready yet — wait silently
+
+        rx, ry, rtheta = pose
+        gx, gy         = self.bearing_goal
+
+        dx       = gx - rx
+        dy       = gy - ry
+        distance = math.sqrt(dx**2 + dy**2)
+
+        if distance < self.ARRIVAL_THRESH:
+            # Arrived — stop motors and disarm controller
+            self.cmd_vel_pub.publish(Twist())
+            self.bearing_active = False
+            self.bearing_goal   = None
+            self.get_logger().info('[Bearing] Goal reached. Stopped.')
+            _log('[Bearing] Goal reached. Stopped.')
+            return
+
+        # Angle from robot to goal in map frame
+        bearing = math.atan2(dy, dx)
+
+        # Heading error — how far off are we from pointing at the goal
+        heading_error = bearing - rtheta
+        # Normalise to [-π, π]
+        heading_error = math.atan2(
+            math.sin(heading_error),
+            math.cos(heading_error)
+        )
+
+        # Decompose into robot-body frame (holonomic Mecanum)
+        vx_raw = math.cos(heading_error) * self.BASE_SPEED
+        vy_raw = math.sin(heading_error) * self.BASE_SPEED
+        w_raw  = self.KP_W * heading_error
+
+        # Scale into m/s for Twist — bridge maps 0.5 m/s → PWM 175
+        # BASE_SPEED 120 PWM → (120-70)/(175-70) * 0.5 ≈ 0.24 m/s
+        SCALE = 0.5 / 175.0
+        twist = Twist()
+        twist.linear.x  = float(max(-175, min(175, vx_raw))) * SCALE
+        twist.linear.y  = float(max(-175, min(175, vy_raw))) * SCALE
+        twist.angular.z = float(max(-1.0, min(1.0, w_raw * SCALE)))
+
+        self.cmd_vel_pub.publish(twist)
+
+    def cancel_goal(self):
+        """
+        Cancels any active bearing goal and immediately commands zero velocity.
+        """
+        self.bearing_active = False
+        self.bearing_goal   = None
+        self.cmd_vel_pub.publish(Twist())   # immediate zero-velocity stop
+        self.get_logger().info('[Bearing] Goal cancelled. Stopped.')
+        _log('[Bearing] Goal cancelled. Stopped.')
+
+    def send_nav_goal(self, pt, checkpoint_name):
+        goal_x = float(pt['x'])
+        goal_y = float(pt['y'])
         self._current_goal_pt = pt
-        goal = NavigateToPose.Goal()
-        goal.pose.header.frame_id = 'map'
-        goal.pose.header.stamp = self.get_clock().now().to_msg()
-        goal.pose.pose.position.x = float(pt['x'])
-        goal.pose.pose.position.y = float(pt['y'])
-        goal.pose.pose.position.z = float(pt['z'])
-        goal.pose.pose.orientation.x = float(pt['qx'])
-        goal.pose.pose.orientation.y = float(pt['qy'])
-        goal.pose.pose.orientation.z = float(pt['qz'])
-        goal.pose.pose.orientation.w = float(pt['qw'])
-        
-        self.send_goal_future = self.nav_client.send_goal_async(goal, feedback_callback=self._nav_feedback_cb)
-        self.send_goal_future.add_done_callback(self._nav_goal_response_cb)
+        _log(f"[NAV] Sending goal to checkpoint '{checkpoint_name}' at ({goal_x:.2f}, {goal_y:.2f})")
+
+        # Cancel any prior bearing goal cleanly
+        if self.bearing_active:
+            self.cmd_vel_pub.publish(Twist())  # zero stop
+            self.bearing_active = False
+
+        # Arm the bearing controller
+        self.bearing_goal   = (goal_x, goal_y)   # use whatever variable
+        self.bearing_active = True                 # names already exist here
+        self.get_logger().info(
+            f'[Bearing] New goal: ({goal_x:.2f}, {goal_y:.2f})'
+        )
+        _log(f'[Bearing] New goal: ({goal_x:.2f}, {goal_y:.2f})')
 
     def _nav_feedback_cb(self, feedback_msg):
         fb = feedback_msg.feedback
@@ -822,7 +946,10 @@ class RobotManagerNode(Node):
 def _handle_command(node, payload):
     cmd = payload.get('cmd')
 
-    if cmd == 1:
+    if cmd in (0, 'cancel', 'stop'):
+        node.cancel_goal()
+
+    elif cmd == 1:
         with map_lock:
             count = map_received_count
         _log(f"[STATUS] /map frames: {count}" + (" — active!" if count > 0 else " — move/turn robot to start SLAM."))
@@ -865,6 +992,7 @@ def _handle_command(node, payload):
         node.send_nav_goal(pt, checkpoint)
 
     elif cmd == 5:
+        node.cancel_goal()
         _log("[EXIT] Shutting down...")
         rclpy.shutdown()
         sys.exit(0)
@@ -981,7 +1109,7 @@ def interactive_menu():
     _log("==========================================")
     _log("  DHRUV SLAM — Control Panel")
     _log("  Web UI: http://localhost:8000")
-    _log("  Terminal: 1 | 2:name | 3:mapname | 4:map,checkpoint | 6:mapname (load) | 7:x,y | 5=exit")
+    _log("  Terminal: 0=stop | 1 | 2:name | 3:mapname | 4:map,checkpoint | 6:mapname (load) | 7:x,y | 5=exit")
     _log("==========================================")
 
 
@@ -991,6 +1119,9 @@ def interactive_menu():
             try:
                 line = input("").strip()
                 if not line:
+                    continue
+                if line.lower() in ('0', 'stop', 'cancel'):
+                    cmd_queue.put({'cmd': 0})
                     continue
                 if ':' in line:
                     c, arg = line.split(':', 1)
