@@ -15,18 +15,36 @@ class CmdVelBridge(Node):
         self._last_print = 0.0
         self._last_no_serial_warn = 0.0
         self._last_reconnect_attempt = 0.0
+        self._last_smoothed_time = 0.0
         self._is_moving = False
 
-        # Only subscribe to /cmd_vel (the final smoothed velocity stream).
-        # Subscribing to both /cmd_vel and /cmd_vel_nav caused conflicting interleaving commands.
-        self.subscription = self.create_subscription(Twist, '/cmd_vel', self.vel_callback, 10)
+        # Dual-topic subscription with dynamic priority:
+        # If /cmd_vel (smoothed) is publishing, it takes priority and /cmd_vel_nav is dropped.
+        # If /cmd_vel is silent (e.g. velocity_smoother inactive or failed), /cmd_vel_nav seamlessly drives the motors.
+        self.sub_cmd_vel = self.create_subscription(Twist, '/cmd_vel', self.cmd_vel_cb, 10)
+        self.sub_cmd_vel_nav = self.create_subscription(Twist, '/cmd_vel_nav', self.cmd_vel_nav_cb, 10)
         
         # Connect to Arduino
         self._connect_arduino()
 
         self.last_msg_time = 0.0
-        # Safety watchdog: check every 100ms. If Nav2 stops publishing, send STOP once.
+        # Safety watchdog: check every 100ms. If Nav2 stops publishing for > 0.8s, send STOP once.
         self.timer = self.create_timer(0.1, self.watchdog)
+
+    def _drain_serial(self):
+        """Continuously drain Arduino serial RX buffer so Linux kernel CDC buffer never fills up."""
+        if self.serial and self.serial.is_open:
+            try:
+                waiting = self.serial.in_waiting
+                if waiting > 0:
+                    raw = self.serial.read(waiting).decode('utf-8', errors='ignore')
+                    if "ERR" in raw or "Watchdog" in raw:
+                        for l in raw.strip().split('\n'):
+                            l = l.strip()
+                            if l:
+                                self.get_logger().warn(f"[Arduino] {l}")
+            except Exception:
+                pass
 
     def _connect_arduino(self):
         if self.serial and self.serial.is_open:
@@ -75,7 +93,17 @@ class CmdVelBridge(Node):
         self.get_logger().warn("[Bridge] Arduino USB port not connected. Will retry in background...")
         return False
 
-    def vel_callback(self, msg):
+    def cmd_vel_cb(self, msg):
+        self._last_smoothed_time = time.time()
+        self.process_twist(msg, source="/cmd_vel")
+
+    def cmd_vel_nav_cb(self, msg):
+        # If /cmd_vel has received a message in the last 0.6s, ignore /cmd_vel_nav to prevent interleaving
+        if time.time() - self._last_smoothed_time < 0.6:
+            return
+        self.process_twist(msg, source="/cmd_vel_nav")
+
+    def process_twist(self, msg, source="/cmd_vel"):
         now = time.time()
         self.last_msg_time = now
         x = msg.linear.x
@@ -87,6 +115,9 @@ class CmdVelBridge(Node):
         MAX_Z = 1.0   # rad/s Nav2 max angular speed
         MIN_PWM = 70  # minimum PWM to overcome static friction
         MAX_PWM = 175 # keep under hardware SPEED_LIMIT (180)
+
+        # Drain any incoming serial bytes from Arduino so the Linux kernel buffer never fills up
+        self._drain_serial()
 
         # Holonomic Mecanum mixed drive calculation
         # Map linear x, y and angular z directly into motor velocity components
@@ -111,7 +142,7 @@ class CmdVelBridge(Node):
             cmd = f"<MIX,{vx},{vy},{w},0>\n"
 
         if now - self._last_print > 0.5:
-            self.get_logger().info(f"Nav2 cmd_vel x:{x:.2f} y:{y:.2f} z:{z:.2f} -> {cmd.strip()}")
+            self.get_logger().info(f"[{source}] x:{x:.2f} y:{y:.2f} z:{z:.2f} -> {cmd.strip()}")
             self._last_print = now
 
         # Only send if command changed or 80ms elapsed during continuous active movement
@@ -142,21 +173,24 @@ class CmdVelBridge(Node):
             self._last_send_time = now
 
     def watchdog(self):
+        # Periodic drain of serial buffer
+        self._drain_serial()
+
         # If we have no serial, attempt auto-reconnect with backoff
         if not self.serial or not self.serial.is_open:
             self._connect_arduino()
             return
 
-        # If Nav2 has stopped sending cmd_vel for > 0.4s and we were previously moving,
+        # If Nav2 has stopped sending cmd_vel for > 0.8s and we were previously moving,
         # send <STOP> once to bring the robot to a halt without spamming the bus.
         now = time.time()
-        if (now - self.last_msg_time > 0.4) and self._is_moving:
+        if (now - self.last_msg_time > 0.8) and self._is_moving:
             try:
                 self.serial.write(b"<STOP>\n")
                 self.serial.flush()
                 self._is_moving = False
                 self._last_cmd = "<STOP>\n"
-                self.get_logger().info("[Bridge Watchdog] Nav2 idle/timeout: sent STOP.")
+                self.get_logger().info("[Bridge Watchdog] Nav2 idle/timeout (0.8s): sent STOP.")
             except Exception as e:
                 self.get_logger().error(f"Watchdog serial write failed: {e}")
                 try:

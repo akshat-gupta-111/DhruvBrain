@@ -255,7 +255,14 @@ void loop()
     }
     else if (c != '\r')
     {
-      _serialBuf += c;
+      if (_serialBuf.length() < 128)
+      {
+        _serialBuf += c;
+      }
+      else
+      {
+        _serialBuf = ""; // Reset on buffer overflow
+      }
     }
   }
 
@@ -306,8 +313,15 @@ void handleIncomingSerial(String line)
 {
   lastSerialCmdTime = millis();
 
-  // 1. Immediately send ACK confirmation back to Jetson over USB
-  Serial.println("ACK");
+  bool isMixCmd = line.startsWith("<MIX,") || line.startsWith("<mix,") ||
+                  line.startsWith("MIX,") || line.startsWith("mix,");
+
+  // 1. Send ACK for configuration / non-streaming commands so Jetson handshake works.
+  //    Suppress ACK for high-frequency streaming MIX commands to prevent USB CDC buffer overflow!
+  if (!isMixCmd)
+  {
+    Serial.println("ACK");
+  }
 
   // 2. Check if this is a mode switch command
   if (handleModeSwitch(line, "CABLE"))
@@ -315,8 +329,11 @@ void handleIncomingSerial(String line)
     return;
   }
 
-  // 3. Mirror the received command over BLE so phone/dashboard sees it in terminal!
-  logOut("RX[CABLE]: " + line);
+  // 3. Mirror the received command over BLE only for non-streaming commands (rate-limited for MIX)
+  if (!isMixCmd)
+  {
+    logOut("RX[CABLE]: " + line);
+  }
 
   // 4. Always execute — USB cable commands from Jetson/Nav2 are always trusted.
   //    No arbitration blocking here. BLE and cable can coexist safely.
@@ -601,7 +618,12 @@ void parseMotorPart(String str, String source)
         motorDuration = 0;
         continuousActive = (vx != 0 || vy != 0 || w != 0);
       }
-      logOut("MOTOR: MIX Vx=" + String(vx) + " Vy=" + String(vy) + " W=" + String(w) + " [" + source + "]");
+      static unsigned long lastMixLogTime = 0;
+      if (millis() - lastMixLogTime > 1000)
+      {
+        logOut("MOTOR: MIX Vx=" + String(vx) + " Vy=" + String(vy) + " W=" + String(w) + " [" + source + "]");
+        lastMixLogTime = millis();
+      }
       return;
     }
   }
@@ -1130,10 +1152,15 @@ void mixDrive(int Vx, int Vy, int W)
 
   if (DEBUG)
   {
-    String line = "MIX Vx=" + String(Vx) + " Vy=" + String(Vy) + " W=" + String(W) +
-                  " -> M1=" + String((int)M1) + " M2=" + String((int)M2) +
-                  " M3=" + String((int)M3) + " M4=" + String((int)M4);
-    logOut(line);
+    static unsigned long lastMixDebugTime = 0;
+    if (millis() - lastMixDebugTime > 1000)
+    {
+      String line = "MIX Vx=" + String(Vx) + " Vy=" + String(Vy) + " W=" + String(W) +
+                    " -> M1=" + String((int)M1) + " M2=" + String((int)M2) +
+                    " M3=" + String((int)M3) + " M4=" + String((int)M4);
+      logOut(line);
+      lastMixDebugTime = millis();
+    }
   }
 }
 
