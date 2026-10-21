@@ -50,7 +50,7 @@ bool bleCentralConnected = false;
 // ARBITRATION STATE
 // ============================================================
 
-bool is_autonomous = true; // Default: Jetson cable control active
+bool is_autonomous = false; // Default: Manual / UI Controller active (Jetson turns it on via MODE:AUTO)
 
 // ============================================================
 // MOTOR PINS (IBT-2 / BTS7960 Drivers on UNO R4)
@@ -95,7 +95,7 @@ bool motorTimedActive = false;
 unsigned long defaultTranslationDurationMs = 3000; // Default sustained translation: 3000ms (3.0s)
 unsigned long defaultPivotDurationMs       = 1800; // Default sustained pivot: 1800ms (1.8s)
 unsigned long minTimedDurationMs           = 2500; // Threshold: timed translations < 2500ms will be updated to default
-bool durationOverrideActive                = true; // Active duration safeguard
+bool durationOverrideActive                = false; // Raw pass-through by default; sustained mode enabled only when requested
 
 // Continuous mode safety watchdog: if Jetson sends duration 0 and dies/hangs, auto-stop after 1500ms
 unsigned long lastSerialCmdTime            = 0;
@@ -345,6 +345,8 @@ void handleIncomingSerial(String line)
 
 void handleIncomingBle(String line)
 {
+  lastSerialCmdTime = millis(); // Keep watchdog alive during continuous manual streaming
+
   // 1. Check if this is a mode switch command (Always allowed over BLE)
   if (handleModeSwitch(line, "BLE"))
   {
@@ -354,22 +356,7 @@ void handleIncomingBle(String line)
   // 2. Log received BLE message to Serial and BLE Terminal
   logOut("RX[BLE]: " + line);
 
-  // 3. Arbitration Check:
-  //    If is_autonomous is TRUE, Dashboard movement commands are dropped (unless STOP)
-  if (is_autonomous)
-  {
-    String check = line;
-    check.toUpperCase();
-    bool isStop = (check.indexOf("STOP") != -1 || check.indexOf("HALT") != -1 || check == "Q" || check == "X");
-
-    if (!isStop)
-    {
-      logOut("[BLOCKED] Dashboard command dropped. AUTONOMOUS (Jetson) mode is active!");
-      return;
-    }
-  }
-
-  // 4. Parse and execute the dashboard command
+  // 3. Parse and execute the dashboard command (UI manual control always responsive)
   parseAndExecuteCommand(line, "BLE");
 }
 
@@ -977,16 +964,16 @@ void handleLegacyCommand(String command, String source)
     return;
   }
 
-  if (command == "N")   { moveForward();           logOut("CMD: FORWARD [" + source + "]"); return; }
-  if (command == "S")   { moveBackward();          logOut("CMD: BACKWARD [" + source + "]"); return; }
-  if (command == "W")   { strafeLeft();            logOut("CMD: LEFT [" + source + "]"); return; }
-  if (command == "E")   { strafeRight();           logOut("CMD: RIGHT [" + source + "]"); return; }
-  if (command == "NE")  { moveForwardRight();      logOut("CMD: FORWARD-RIGHT [" + source + "]"); return; }
-  if (command == "NW")  { moveForwardLeft();       logOut("CMD: FORWARD-LEFT [" + source + "]"); return; }
-  if (command == "SE")  { moveBackwardRight();     logOut("CMD: BACKWARD-RIGHT [" + source + "]"); return; }
-  if (command == "SW")  { moveBackwardLeft();      logOut("CMD: BACKWARD-LEFT [" + source + "]"); return; }
-  if (command == "CW")  { rotateCW();              logOut("CMD: ROTATE CW [" + source + "]"); return; }
-  if (command == "CCW") { rotateCCW();             logOut("CMD: ROTATE CCW [" + source + "]"); return; }
+  if (command == "N")   { motorTimedActive = false; continuousActive = true; moveForward();           logOut("CMD: FORWARD [" + source + "]"); return; }
+  if (command == "S")   { motorTimedActive = false; continuousActive = true; moveBackward();          logOut("CMD: BACKWARD [" + source + "]"); return; }
+  if (command == "W")   { motorTimedActive = false; continuousActive = true; strafeLeft();            logOut("CMD: LEFT [" + source + "]"); return; }
+  if (command == "E")   { motorTimedActive = false; continuousActive = true; strafeRight();           logOut("CMD: RIGHT [" + source + "]"); return; }
+  if (command == "NE")  { motorTimedActive = false; continuousActive = true; moveForwardRight();      logOut("CMD: FORWARD-RIGHT [" + source + "]"); return; }
+  if (command == "NW")  { motorTimedActive = false; continuousActive = true; moveForwardLeft();       logOut("CMD: FORWARD-LEFT [" + source + "]"); return; }
+  if (command == "SE")  { motorTimedActive = false; continuousActive = true; moveBackwardRight();     logOut("CMD: BACKWARD-RIGHT [" + source + "]"); return; }
+  if (command == "SW")  { motorTimedActive = false; continuousActive = true; moveBackwardLeft();      logOut("CMD: BACKWARD-LEFT [" + source + "]"); return; }
+  if (command == "CW")  { motorTimedActive = false; continuousActive = true; rotateCW();              logOut("CMD: ROTATE CW [" + source + "]"); return; }
+  if (command == "CCW") { motorTimedActive = false; continuousActive = true; rotateCCW();             logOut("CMD: ROTATE CCW [" + source + "]"); return; }
 
   logOut("ERR: Unrecognized command: " + command);
 }
