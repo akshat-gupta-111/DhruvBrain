@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>UNO R4 H-Drive BLE Telemetry & Controller</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;800&family=Orbitron:wght@500;700;900&family=Outfit:wght@300;400;600;700;800&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+  <div class="background-effects">
+    <div class="cyber-grid"></div>
+    <div class="radial-glow top-left"></div>
+    <div class="radial-glow bottom-right"></div>
+  </div>
+
+  <div class="app-container">
+    <!-- Top Header & Connection Bar -->
+    <header class="app-header">
+      <div class="header-branding">
+        <div class="logo-badge">
+          <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+            <polyline points="2 17 12 22 22 17"></polyline>
+            <polyline points="2 12 12 17 22 12"></polyline>
+          </svg>
+        </div>
+        <div>
+          <h1 class="brand-title">Dhruv's <span>H-DRIVE</span></h1>
+          <p class="brand-subtitle">Arduino UNO R4 WiFi &bull; Holonomic 4-Wheel BLE Controller</p>
+        </div>
+      </div>
+
+      <!-- Bluetooth Connection Panel -->
+      <div class="connection-card">
+        <div class="connection-status-pill" id="connectionStatusPill">
+          <span class="status-dot disconnected" id="statusDot"></span>
+          <span class="status-label" id="statusLabel">DISCONNECTED</span>
+        </div>
+
+        <button id="btnConnectBle" class="btn btn-connect" type="button">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M7 7l10 10-5 5V2l5 5L7 17"></path>
+          </svg>
+          <span id="btnConnectText">Connect UNO R4</span>
+        </button>
+
+        <!-- Arbitration Mode Toggle -->
+        <div class="mode-control-wrap" title="Arbitration: Autonomous (Jetson controls motors) vs Manual (Dashboard controls motors)">
+          <span class="mode-label-text">MODE:</span>
+          <button id="btnToggleMode" class="btn btn-mode-toggle mode-auto" type="button" title="Click to toggle between Autonomous and Manual mode">
+            <span class="mode-indicator"></span>
+            <span id="btnModeText">AUTONOMOUS</span>
+          </button>
+        </div>
+
+        <div class="telemetry-stats" id="telemetryStats">
+          <div class="stat-item" title="Device Name">
+            <span class="stat-key">DEV:</span>
+            <span class="stat-val" id="statDevName">--</span>
+          </div>
+          <div class="stat-item" title="Sent Commands">
+            <span class="stat-key">TX:</span>
+            <span class="stat-val" id="statTxCount">0</span>
+          </div>
+          <div class="stat-item" title="Received Telemetry">
+            <span class="stat-key">RX:</span>
+            <span class="stat-val" id="statRxCount">0</span>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- Bluetooth Unsupported Banner (hidden if supported) -->
+    <div id="bleWarningBanner" class="alert-banner hidden">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10"></circle>
+        <line x1="12" y1="8" x2="12" y2="12"></line>
+        <line x1="12" y1="16" x2="12.01" y2="16"></line>
+      </svg>
+      <span>Web Bluetooth is not supported or not enabled in this browser. Please use <strong>Google Chrome</strong>,
+        <strong>Microsoft Edge</strong>, or <strong>Opera</strong> over <strong>HTTPS</strong> or
+        <strong>localhost</strong>.</span>
+    </div>
+
+    <!-- Main Dashboard Grid -->
+    <main class="dashboard-grid">
+
+      <!-- Column 1: Direct Command Matrix -->
+      <section class="glass-panel panel-controls controls-locked" id="panelControls">
+        <div class="panel-header">
+          <div class="panel-title-wrap">
+            <span class="panel-icon">&#10022;</span>
+            <h2>Directional Matrix</h2>
+            <span class="lock-pill locked" id="matrixLockPill">🔒 AUTONOMOUS</span>
+          </div>
+          <div class="controls-toggles-row" style="display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;">
+            <div class="mode-toggle-group">
+              <label class="toggle-switch" title="Hold button down to keep moving, release to stop">
+                <input type="checkbox" id="chkHoldToMove" checked>
+                <span class="toggle-slider"></span>
+              </label>
+              <span class="toggle-label">Hold-to-Move</span>
+            </div>
+            <div class="mode-toggle-group">
+              <label class="toggle-switch" title="When ON, passes <FWD,180,0>|<LED,IDLE_WHITE> to UNO as passed from Jetson">
+                <input type="checkbox" id="chkJetsonFormat" checked>
+                <span class="toggle-slider"></span>
+              </label>
+              <span class="toggle-label" title="Pass commands in Jetson parsed format (<FWD,180,0>|<LED,IDLE_WHITE>)">Jetson Format</span>
+            </div>
+          </div>
+        </div>
+
+        <p class="panel-desc">Direct command transmission mapping 1-to-1 to UNO R4 holonomic vectors.</p>
+
+        <!-- 3x3 Compass Matrix -->
+        <div class="matrix-grid">
+          <!-- Row 1 -->
+          <button class="cmd-btn cmd-diagonal" data-cmd="NW" id="btn-nw" title="Forward-Left (NW)">
+            <span class="btn-arrow">&#11017;</span>
+            <span class="btn-name">NW</span>
+            <span class="btn-sub">FWD-L</span>
+          </button>
+
+          <button class="cmd-btn cmd-cardinal" data-cmd="N" id="btn-n" title="Forward (N)">
+            <span class="btn-arrow">&#11014;</span>
+            <span class="btn-name">FORWARD</span>
+            <span class="btn-sub">N</span>
+          </button>
+
+          <button class="cmd-btn cmd-diagonal" data-cmd="NE" id="btn-ne" title="Forward-Right (NE)">
+            <span class="btn-arrow">&#11016;</span>
+            <span class="btn-name">NE</span>
+            <span class="btn-sub">FWD-R</span>
+          </button>
+
+          <!-- Row 2 -->
+          <button class="cmd-btn cmd-cardinal" data-cmd="W" id="btn-w" title="Left (W)">
+            <span class="btn-arrow">&#11013;</span>
+            <span class="btn-name">LEFT</span>
+            <span class="btn-sub">W</span>
+          </button>
+
+          <button class="cmd-btn cmd-stop" data-cmd="Q" id="btn-stop" title="Emergency Stop (Q)">
+            <span class="stop-icon">&#9632;</span>
+            <span class="btn-name">STOP</span>
+            <span class="btn-sub">Q / HALT</span>
+          </button>
+
+          <button class="cmd-btn cmd-cardinal" data-cmd="E" id="btn-e" title="Right (E)">
+            <span class="btn-arrow">&#10145;</span>
+            <span class="btn-name">RIGHT</span>
+            <span class="btn-sub">E</span>
+          </button>
+
+          <!-- Row 3 -->
+          <button class="cmd-btn cmd-diagonal" data-cmd="SW" id="btn-sw" title="Backward-Left (SW)">
+            <span class="btn-arrow">&#11019;</span>
+            <span class="btn-name">SW</span>
+            <span class="btn-sub">BWD-L</span>
+          </button>
+
+          <button class="cmd-btn cmd-cardinal" data-cmd="S" id="btn-s" title="Backward (S)">
+            <span class="btn-arrow">&#11015;</span>
+            <span class="btn-name">BACKWARD</span>
+            <span class="btn-sub">S</span>
+          </button>
+
+          <button class="cmd-btn cmd-diagonal" data-cmd="SE" id="btn-se" title="Backward-Right (SE)">
+            <span class="btn-arrow">&#11018;</span>
+            <span class="btn-name">SE</span>
+            <span class="btn-sub">BWD-R</span>
+          </button>
+        </div>
+
+        <!-- Rotation Controls Bar -->
+        <div class="rotation-bar">
+          <button class="cmd-btn cmd-rotation" data-cmd="CCW" id="btn-ccw" title="Counter-Clockwise (CCW)">
+            <span class="rotate-icon">&#8634;</span>
+            <div>
+              <span class="btn-name">ROTATE CCW</span>
+              <span class="btn-sub">Counter-Clockwise</span>
+            </div>
+          </button>
+
+          <button class="cmd-btn cmd-rotation" data-cmd="CW" id="btn-cw" title="Clockwise (CW)">
+            <span class="rotate-icon">&#8635;</span>
+            <div>
+              <span class="btn-name">ROTATE CW</span>
+              <span class="btn-sub">Clockwise</span>
+            </div>
+          </button>
+        </div>
+
+        <!-- Keyboard Controls Helper -->
+        <div class="keyboard-helper">
+          <div class="key-hint"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> /
+            <kbd>&uarr;</kbd><kbd>&larr;</kbd><kbd>&darr;</kbd><kbd>&rarr;</kbd> Move
+          </div>
+          <div class="key-hint"><kbd>Q</kbd><kbd>E</kbd> Rotate</div>
+          <div class="key-hint"><kbd>SPACE</kbd> / <kbd>X</kbd> Stop</div>
+        </div>
+      </section>
+
+      <!-- Column 2: Omnidirectional Virtual Joystick -->
+      <section class="glass-panel panel-joystick controls-locked" id="panelJoystick">
+        <div class="panel-header">
+          <div class="panel-title-wrap">
+            <span class="panel-icon">&#9678;</span>
+            <h2>Holonomic Joystick</h2>
+            <span class="lock-pill locked" id="joystickLockPill">🔒 LOCKED</span>
+          </div>
+          <div class="active-badge" id="joystickActiveBadge">IDLE</div>
+        </div>
+
+        <p class="panel-desc">Drag to glide in 360&deg; omnidirectional space with live deadzone &amp; vector
+          calculation.</p>
+
+        <!-- Joystick Interactive Zone -->
+        <div class="joystick-wrapper">
+          <div class="joystick-base" id="joystickBase">
+            <!-- Compass Ring Background -->
+            <div class="compass-crosshair-h"></div>
+            <div class="compass-crosshair-v"></div>
+            <div class="compass-ring ring-outer"></div>
+            <div class="compass-ring ring-mid"></div>
+            <div class="compass-ring ring-deadzone"></div>
+
+            <div class="compass-labels">
+              <span class="compass-label label-n">N</span>
+              <span class="compass-label label-ne">NE</span>
+              <span class="compass-label label-e">E</span>
+              <span class="compass-label label-se">SE</span>
+              <span class="compass-label label-s">S</span>
+              <span class="compass-label label-sw">SW</span>
+              <span class="compass-label label-w">W</span>
+              <span class="compass-label label-nw">NW</span>
+            </div>
+
+            <!-- Joystick Puck Thumb -->
+            <div class="joystick-stick" id="joystickStick">
+              <div class="stick-inner"></div>
+              <div class="stick-pulse"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Joystick Telemetry Readouts -->
+        <div class="joystick-telemetry">
+          <div class="telemetry-box">
+            <span class="tele-title">COMMAND</span>
+            <span class="tele-value text-accent" id="teleCmd">STOP [Q]</span>
+          </div>
+          <div class="telemetry-box">
+            <span class="tele-title">ANGLE</span>
+            <span class="tele-value" id="teleAngle">0&deg;</span>
+          </div>
+          <div class="telemetry-box">
+            <span class="tele-title">INTENSITY</span>
+            <span class="tele-value" id="teleIntensity">0%</span>
+          </div>
+        </div>
+
+        <!-- Motor Calibration & Quick Test Presets -->
+        <div class="presets-section">
+          <div class="presets-header">
+            <span>MOTOR PRESET TESTING</span>
+            <span class="hint-text">Tokens</span>
+          </div>
+          <div class="preset-buttons">
+            <button class="btn btn-sm btn-outline preset-btn" data-token="T1_150" type="button"
+              title="M1 Forward 150">M1 Test</button>
+            <button class="btn btn-sm btn-outline preset-btn" data-token="T2_150" type="button"
+              title="M2 Forward 150">M2 Test</button>
+            <button class="btn btn-sm btn-outline preset-btn" data-token="T3_150" type="button"
+              title="M3 Forward 150">M3 Test</button>
+            <button class="btn btn-sm btn-outline preset-btn" data-token="T4_150" type="button"
+              title="M4 Forward 150">M4 Test</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Column 3: Live Serial Logger & Telemetry Stream -->
+      <section class="glass-panel panel-logger">
+        <div class="panel-header">
+          <div class="panel-title-wrap">
+            <span class="panel-icon">&#9000;</span>
+            <h2>Serial &amp; BLE Telemetry</h2>
+          </div>
+          <div class="log-actions">
+            <button class="btn-icon" id="btnClearLog" title="Clear Console Log" type="button">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="3 6 5 6 21 6"></polyline>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+              </svg>
+            </button>
+            <button class="btn-icon" id="btnExportLog" title="Download Log as .txt" type="button">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="7 10 12 15 17 10"></polyline>
+                <line x1="12" y1="15" x2="12" y2="3"></line>
+              </svg>
+            </button>
+            <button class="btn-icon active" id="btnAutoScroll" title="Toggle Auto-Scroll" type="button">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="12" y1="5" x2="12" y2="19"></line>
+                <polyline points="19 12 12 19 5 12"></polyline>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Filter Tabs -->
+        <div class="filter-tabs">
+          <button class="tab-btn active" data-filter="all" type="button">ALL</button>
+          <button class="tab-btn" data-filter="tx" type="button">TX (SENT)</button>
+          <button class="tab-btn" data-filter="rx" type="button">RX (BLE LOG)</button>
+          <button class="tab-btn" data-filter="sys" type="button">SYSTEM</button>
+        </div>
+
+        <!-- Terminal Output Container -->
+        <div class="terminal-container" id="terminalContainer">
+          <div class="terminal-body" id="terminalBody">
+            <div class="log-entry log-sys">
+              <span class="log-time">[SYS]</span>
+              <span class="log-tag tag-sys">SYS</span>
+              <span class="log-text">Dashboard initialized. Ready to connect to UNO R4 WiFi.</span>
+            </div>
+            <div class="log-entry log-sys">
+              <span class="log-time">[SYS]</span>
+              <span class="log-tag tag-sys">BLE</span>
+              <span class="log-text">Target Service: 12345678-1234-1234-1234-1234567890ab | Cmd: ...cd | Log:
+                ...ef</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Manual Command Input Form -->
+        <form class="terminal-input-bar" id="terminalInputForm">
+          <div class="input-prefix">&gt;</div>
+          <input type="text" id="manualCmdInput" class="terminal-input"
+            placeholder="Send raw token (e.g. N, Q, T1_150, CW)..." autocomplete="off" spellcheck="false">
+          <button type="submit" class="btn btn-send">SEND</button>
+        </form>
+      </section>
+
+    </main>
+
+    <!-- Footer Status / Diagnostic Bar -->
+    <footer class="app-footer">
+      <div class="footer-left">
+        <span>SERVICE UUID: <code>19b10000-e8f2-537e-4f6c-d104768a1214</code> (Fallback: <code>12345678-...</code>)</span>
+      </div>
+      <div class="footer-right">
+        <span>DhruvBrain &bull; Jetson Cable Link + BLE Telemetry Arbitrator</span>
+      </div>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+
+</html>

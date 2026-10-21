@@ -110,36 +110,43 @@ class CmdVelBridge(Node):
         y = msg.linear.y
         z = msg.angular.z
 
-        # Proportional mapping parameters
-        MAX_X = 0.5   # m/s Nav2 max linear speed
-        MAX_Z = 1.0   # rad/s Nav2 max angular speed
+        # Velocity ranges match the conservative Nav2 limits below.
+        MAX_LINEAR = 0.26  # m/s, shared x/y scale preserves body-velocity ratios
+        MAX_Y = 0.12  # m/s, conservative lateral speed cap
+        MAX_Z = 1.0   # rad/s
         MIN_PWM = 70  # minimum PWM to overcome static friction
         MAX_PWM = 175 # keep under hardware SPEED_LIMIT (180)
 
         # Drain any incoming serial bytes from Arduino so the Linux kernel buffer never fills up
         self._drain_serial()
 
-        # Holonomic Mecanum mixed drive calculation
-        # Map linear x, y and angular z directly into motor velocity components
-        if abs(x) < 0.01 and abs(y) < 0.01 and abs(z) < 0.02:
+        # Scale each body velocity linearly, then compensate for motor
+        # deadband with one common factor so the requested motion ratios remain.
+        x = 0.0 if abs(x) < 0.01 else max(-MAX_LINEAR, min(MAX_LINEAR, x))
+        y = 0.0 if abs(y) < 0.01 else max(-MAX_Y, min(MAX_Y, y))
+        z = 0.0 if abs(z) < 0.02 else max(-MAX_Z, min(MAX_Z, z))
+
+        if x == 0.0 and y == 0.0 and z == 0.0:
             cmd = "<STOP>\n"
             is_active_move = False
         else:
             is_active_move = True
-            vx = 0
-            vy = 0
-            w  = 0
-            if abs(x) >= 0.01:
-                sign_x = 1 if x > 0 else -1
-                vx = int(sign_x * (MIN_PWM + (min(abs(x), MAX_X) / MAX_X) * (MAX_PWM - MIN_PWM)))
-            if abs(y) >= 0.01:
-                sign_y = 1 if y > 0 else -1
-                vy = int(sign_y * (MIN_PWM + (min(abs(y), MAX_X) / MAX_X) * (MAX_PWM - MIN_PWM)))
-            if abs(z) >= 0.02:
-                sign_z = 1 if z > 0 else -1
-                w = int(sign_z * (MIN_PWM + (min(abs(z), MAX_Z) / MAX_Z) * (MAX_PWM - MIN_PWM)))
-            
-            cmd = f"<MIX,{vx},{vy},{w},0>\n"
+            vx = int(round((x / MAX_LINEAR) * MAX_PWM))
+            vy = int(round((y / MAX_LINEAR) * MAX_PWM))
+            w = int(round((z / MAX_Z) * MAX_PWM))
+
+            largest_component = max(abs(vx), abs(vy), abs(w))
+            if 0 < largest_component < MIN_PWM:
+                compensation = MIN_PWM / largest_component
+                vx = int(round(vx * compensation))
+                vy = int(round(vy * compensation))
+                w = int(round(w * compensation))
+
+            if vx == 0 and vy == 0 and w == 0:
+                cmd = "<STOP>\n"
+                is_active_move = False
+            else:
+                cmd = f"<MIX,{vx},{vy},{w},0>\n"
 
         if now - self._last_print > 0.5:
             self.get_logger().info(f"[{source}] x:{x:.2f} y:{y:.2f} z:{z:.2f} -> {cmd.strip()}")

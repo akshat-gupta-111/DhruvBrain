@@ -651,6 +651,9 @@ class RobotManagerNode(Node):
                 _log(f"[WARN] Failed to auto-load checkpoints: {e}")
 
         self.nav_client = ActionClient(self, NavigateToPose, 'navigate_to_pose')
+        self._active_nav_goal = None
+        self._nav_goal_pending = False
+        self._cancel_after_goal_accept = False
         self.initial_pose_pub = self.create_publisher(PoseWithCovarianceStamped, '/initialpose', 10)
         self._last_eta_log = 0.0
 
@@ -882,33 +885,84 @@ class RobotManagerNode(Node):
         self.cmd_vel_pub.publish(twist)
 
     def cancel_goal(self):
-        """
-        Cancels any active path goal and immediately commands zero velocity.
-        """
+        """Cancel the active Nav2 goal and immediately command zero velocity."""
         self._path_active = False
-        self._goal        = None
+        self._goal = None
+        if self._nav_goal_pending:
+            self._cancel_after_goal_accept = True
+        elif self._active_nav_goal is not None:
+            try:
+                self._active_nav_goal.cancel_goal_async()
+            except Exception as e:
+                _log(f"[NAV] Failed to cancel active goal: {e}")
+            self._active_nav_goal = None
+
         self.cmd_vel_pub.publish(Twist())
-        self.get_logger().info('[Path] Goal cancelled / stopped.')
-        _log('[Path] Goal cancelled / stopped.')
+        self.get_logger().info("[NAV] Goal cancelled / stopped.")
+        _log("[NAV] Goal cancelled / stopped.")
 
     def send_nav_goal(self, pt, checkpoint_name):
-        goal_x = float(pt['x'])
-        goal_y = float(pt['y'])
-        self._current_goal_pt = pt
+        goal_x = float(pt["x"])
+        goal_y = float(pt["y"])
 
-        # Stop anything currently running
+        if self._nav_goal_pending:
+            _log("[NAV] A goal request is still being accepted. Please retry shortly.")
+            return
+
+        if not self.nav_client.server_is_ready():
+            _log("[NAV] Nav2 navigate_to_pose action server is not ready.")
+            return
+
+        # Nav2 owns planning and control; keep the legacy line follower inactive.
         self._path_active = False
-        self.cmd_vel_pub.publish(Twist())
+        self._goal = None
+        if self._active_nav_goal is not None:
+            try:
+                self._active_nav_goal.cancel_goal_async()
+            except Exception as e:
+                _log(f"[NAV] Failed to cancel previous goal: {e}")
+            self._active_nav_goal = None
 
-        _log(f"[NAV] 🚀 Starting path follower to checkpoint '{checkpoint_name}' at ({goal_x:.2f}, {goal_y:.2f})")
+        goal = NavigateToPose.Goal()
+        goal.pose = PoseStamped()
+        goal.pose.header.frame_id = "map"
+        goal.pose.header.stamp = self.get_clock().now().to_msg()
+        goal.pose.pose.position.x = goal_x
+        goal.pose.pose.position.y = goal_y
+        goal.pose.pose.position.z = float(pt.get("z", 0.0))
 
-        # Start the straight-line follower
-        # goal_x, goal_y are whatever variable names already
-        # exist in this function for the checkpoint coordinates
-        success = self._set_line_path(goal_x, goal_y)
-        if not success:
-            self.get_logger().error('[Path] Could not set path.')
-            _log('[Path] Could not set path.')
+        # Saved checkpoints include their map-frame orientation. Older files may not.
+        qx = float(pt.get("qx", 0.0))
+        qy = float(pt.get("qy", 0.0))
+        qz = float(pt.get("qz", 0.0))
+        qw = float(pt.get("qw", 1.0))
+        q_norm = math.sqrt(qx * qx + qy * qy + qz * qz + qw * qw)
+        if q_norm < 1e-6:
+            qx, qy, qz, qw = 0.0, 0.0, 0.0, 1.0
+        else:
+            qx, qy, qz, qw = [
+                q / q_norm for q in (qx, qy, qz, qw)
+            ]
+        goal.pose.pose.orientation.x = qx
+        goal.pose.pose.orientation.y = qy
+        goal.pose.pose.orientation.z = qz
+        goal.pose.pose.orientation.w = qw
+
+        self._current_goal_pt = {"x": goal_x, "y": goal_y}
+        self._cancel_after_goal_accept = False
+        self._nav_goal_pending = True
+        _log(
+            f"[NAV] Sending checkpoint '{checkpoint_name}' to Nav2 "
+            f"at ({goal_x:.2f}, {goal_y:.2f}) in map frame."
+        )
+        try:
+            future = self.nav_client.send_goal_async(
+                goal, feedback_callback=self._nav_feedback_cb
+            )
+            future.add_done_callback(self._nav_goal_response_cb)
+        except Exception as e:
+            self._nav_goal_pending = False
+            _log(f"[NAV] Failed to send goal to Nav2: {e}")
 
     def _nav_feedback_cb(self, feedback_msg):
         fb = feedback_msg.feedback
@@ -944,21 +998,46 @@ class RobotManagerNode(Node):
             self._last_eta_log = now
 
     def _nav_goal_response_cb(self, future):
-        goal_handle = future.result()
-        if not goal_handle.accepted:
-            _log("[NAV] Goal REJECTED by Nav2! Likely causes:")
-            _log("[NAV]   1) No map->odom TF (SLAM Toolbox / RF2O not publishing TF?)")
-            _log("[NAV]   2) Robot pose unknown")
-            _log("[NAV]   3) Nav2 costmap not initialised yet — wait 10s and retry")
+        self._nav_goal_pending = False
+        try:
+            goal_handle = future.result()
+        except Exception as e:
+            self._cancel_after_goal_accept = False
+            _log(f"[NAV] Failed to send goal to Nav2: {e}")
             return
-        _log("[NAV] Goal ACCEPTED — Nav2 is planning path and moving robot...")
-        self._get_result_future = goal_handle.get_result_async()
-        self._get_result_future.add_done_callback(self._nav_result_cb)
 
-    def _nav_result_cb(self, future):
-        result = future.result().status
-        status_str = {4: 'SUCCEEDED ✅', 5: 'CANCELED', 6: 'ABORTED ❌'}.get(result, f'UNKNOWN ({result})')
-        _log(f"[NAV] Navigation finished — status: {status_str}")
+        if not goal_handle.accepted:
+            self._cancel_after_goal_accept = False
+            _log("[NAV] Goal REJECTED by Nav2. Check map->odom TF, robot pose, and Nav2 startup.")
+            return
+
+        self._active_nav_goal = goal_handle
+        _log("[NAV] Goal ACCEPTED - Nav2 is planning and controlling the robot.")
+        self._get_result_future = goal_handle.get_result_async()
+        self._get_result_future.add_done_callback(
+            lambda result_future, handle=goal_handle:
+                self._nav_result_cb(result_future, handle)
+        )
+
+        if self._cancel_after_goal_accept:
+            self._cancel_after_goal_accept = False
+            goal_handle.cancel_goal_async()
+
+    def _nav_result_cb(self, future, goal_handle=None):
+        try:
+            result = future.result().status
+        except Exception as e:
+            _log(f"[NAV] Failed to get navigation result: {e}")
+            return
+
+        if self._active_nav_goal is goal_handle:
+            self._active_nav_goal = None
+        status_str = {
+            4: "SUCCEEDED",
+            5: "CANCELED",
+            6: "ABORTED",
+        }.get(result, f"UNKNOWN ({result})")
+        _log(f"[NAV] Navigation finished - status: {status_str}")
 
     def map_callback(self, msg: OccupancyGrid):
         global latest_map_img_bytes, map_received_count, latest_map_time
