@@ -178,11 +178,14 @@ bool parseMotorToken(String token, int &motor, int &speed, bool &reverse);
 // SETUP
 // ============================================================
 
+// Non-blocking serial line accumulator
+String _serialBuf = "";
+
 void setup()
 {
   // 1. Initialize USB CDC Serial (Primary Jetson Link)
   Serial.begin(115200);
-  Serial.setTimeout(20);
+  // Do NOT use setTimeout — non-blocking char reads only
 
   // 2. Initialize Motor PWM Pins
   pinMode(M1_RPWM, OUTPUT);
@@ -220,9 +223,9 @@ void setup()
 
   Serial.println("==================================================");
   Serial.println("   DHRUVBRAIN — JETSON CABLE + BLE ARBITRATOR");
-  Serial.println("   Mode: AUTONOMOUS (is_autonomous = TRUE)");
-  Serial.println("   Duration Safeguard: ACTIVE (3000ms translation / 1800ms pivot)");
-  Serial.println("   Listening on Serial (115200 baud) for Jetson...");
+  Serial.println("   Mode: MANUAL (BLE/UI controller active by default)");
+  Serial.println("   Duration Safeguard: OFF (raw pass-through)");
+  Serial.println("   Listening on Serial (115200 baud) for Jetson/Nav2...");
   Serial.println("==================================================");
 }
 
@@ -236,22 +239,31 @@ void loop()
   checkMotorTimer();
 
   // ----------------------------------------------------------
-  // 1. RECEIVE FROM JETSON NANO (USB SERIAL CABLE)
+  // 1. RECEIVE FROM JETSON / Nav2 (USB SERIAL) — Non-blocking char accumulator
   // ----------------------------------------------------------
-  if (Serial.available())
+  while (Serial.available() > 0)
   {
-    String line = Serial.readStringUntil('\n');
-    line.trim();
-
-    if (line.length() > 0)
+    char c = (char)Serial.read();
+    if (c == '\n')
     {
-      handleIncomingSerial(line);
+      _serialBuf.trim();
+      if (_serialBuf.length() > 0)
+      {
+        handleIncomingSerial(_serialBuf);
+      }
+      _serialBuf = "";
+    }
+    else if (c != '\r')
+    {
+      _serialBuf += c;
     }
   }
 
   // ----------------------------------------------------------
   // 2. RECEIVE FROM DASHBOARD / MOBILE (BLUETOOTH LE)
   // ----------------------------------------------------------
+  BLE.poll(); // Non-blocking BLE event pump — must be called every loop
+
   BLEDevice central = BLE.central();
 
   if (central)
@@ -264,11 +276,8 @@ void loop()
       bleBroadcast(connMsg);
     }
 
-    while (central.connected())
+    if (central.connected())
     {
-      updateStatusLED();
-      checkMotorTimer();
-
       // Check for incoming BLE commands from phone/dashboard
       if (commandChar.written())
       {
@@ -279,24 +288,13 @@ void loop()
           handleIncomingBle(bleVal);
         }
       }
-
-      // Concurrently check USB serial while BLE client is connected
-      if (Serial.available())
-      {
-        String line = Serial.readStringUntil('\n');
-        line.trim();
-        if (line.length() > 0)
-        {
-          handleIncomingSerial(line);
-        }
-      }
-
-      BLE.poll();
     }
-
-    // BLE Disconnected
-    bleCentralConnected = false;
-    Serial.println("BLE: Disconnected from central.");
+    else
+    {
+      // BLE Disconnected
+      bleCentralConnected = false;
+      Serial.println("BLE: Disconnected from central.");
+    }
   }
 }
 
