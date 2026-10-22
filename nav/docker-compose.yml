@@ -1,0 +1,68 @@
+# =============================================================================
+#  DHRUV NAVIGATION & SLAM — docker-compose.yml
+#
+#  Autonomous SLAM & Navigation on NVIDIA Jetson Orin Nano (JetPack 6 / ROS 2 Humble)
+#  Sensors: RPLiDAR A1 (at z=1.6m) + 6-Axis IMU + Monocular Camera (Planar VO)
+#  Fusion: Extended Kalman Filter (robot_localization) — NO Wheel Encoders Needed!
+#
+#  Start everything with a single command:
+#    sudo docker compose up --build
+#
+#  Interactive control panel / checkpoints:
+#    sudo docker attach dhruv-nav
+#    (Detach safely: Ctrl-P, Ctrl-Q)
+#
+#  Live web map and sensor telemetry:
+#    http://<JETSON_IP>:8000
+# =============================================================================
+
+services:
+  nav:
+    build:
+      context: .
+      dockerfile: dockerfile
+    image: dhruv-nav:latest
+    container_name: dhruv-nav
+    restart: unless-stopped
+
+    # Unified entrypoint starts all nodes in deterministic order
+    entrypoint: ["/bin/bash", "/workspace/entrypoint.sh"]
+
+    # Host networking allows direct DDS discovery and zero-overhead port 8000 access
+    network_mode: host
+
+    environment:
+      - ROS_LOCALHOST_ONLY=1
+      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+      - PYTHONUNBUFFERED=1
+      - CAMERA_DEVICE=/dev/video0
+      - IMU_PORT=/dev/ttyUSB1
+      - LIDAR_PORT=/dev/ttyUSB0
+      - ARDUINO_PORT=/dev/ttyACM0
+
+    # Privileged mode provides access to /dev USB, video, serial, and I2C buses
+    privileged: true
+
+    volumes:
+      # Pass through all hardware devices
+      - /dev:/dev
+
+      # Mount Jetson user home directory so maps and checkpoints persist across container restarts
+      - ~/:/root/
+
+      # Live-mount current folder so parameter and script changes are picked up instantly
+      - ./:/workspace/src_live/
+      - ./nav2_params.yaml:/workspace/nav2_params.yaml
+      - ./ekf.yaml:/workspace/ekf.yaml
+      - ./slam_toolbox_params.yaml:/workspace/slam_toolbox_params.yaml
+      - ./entrypoint.sh:/workspace/entrypoint.sh
+      - ./monocular_vo_node.py:/workspace/monocular_vo_node.py
+      - ./imu_node.py:/workspace/imu_node.py
+      - ./cmd_vel_bridge.py:/workspace/cmd_vel_bridge.py
+      - ./robot_manager.py:/workspace/robot_manager.py
+
+    expose:
+      - "8000"
+
+    stdin_open: true
+    tty: true

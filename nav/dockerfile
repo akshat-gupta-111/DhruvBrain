@@ -1,0 +1,162 @@
+# =============================================================================
+#  DHRUV NAVIGATION & SLAM — Dockerfile
+#  Target: NVIDIA Jetson Orin Nano (JetPack 6.x / L4T r36.2.0 / ROS 2 Humble)
+# =============================================================================
+
+FROM dustynv/ros:humble-ros-base-l4t-r36.2.0
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    ROS_DISTRO=humble \
+    ROS_WS=/workspace/rf2o_ws \
+    PYTHONUNBUFFERED=1 \
+    RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+
+WORKDIR /workspace
+
+# -------------------------------------------------
+# 1. Purge legacy ROS 2 APT repository configs
+# -------------------------------------------------
+RUN set -eux; \
+    rm -f \
+      /etc/apt/sources.list.d/ros2.list \
+      /etc/apt/sources.list.d/ros2-latest.list \
+      /etc/apt/sources.list.d/ros2.sources; \
+    rm -f \
+      /usr/share/keyrings/ros-archive-keyring.gpg \
+      /usr/share/keyrings/ros2-latest-archive-keyring.gpg; \
+    if [ -f /etc/apt/sources.list ]; then \
+      sed -i '\|packages.ros.org/ros2/ubuntu|d' \
+        /etc/apt/sources.list; \
+    fi
+
+# -------------------------------------------------
+# 2. Install base utilities and apt keys
+# -------------------------------------------------
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+      ca-certificates \
+      curl \
+      git \
+      gnupg \
+      build-essential \
+      python3-pip \
+      software-properties-common \
+      v4l-utils \
+    && rm -rf /var/lib/apt/lists/*
+
+# -------------------------------------------------
+# 3. Setup fresh ROS 2 apt repository
+# -------------------------------------------------
+RUN set -eux; \
+    source /etc/os-release; \
+    test "${VERSION_CODENAME}" = "jammy"; \
+    ROS_APT_SOURCE_VERSION=$( \
+      curl -fsSL --retry 5 \
+      https://api.github.com/repos/ros-infrastructure/ros-apt-source/releases/latest \
+      | python3 -c \
+        'import json,sys; print(json.load(sys.stdin)["tag_name"])' \
+    ); \
+    curl -fL --retry 5 \
+      "https://github.com/ros-infrastructure/ros-apt-source/releases/download/${ROS_APT_SOURCE_VERSION}/ros2-apt-source_${ROS_APT_SOURCE_VERSION}.jammy_all.deb" \
+      -o /tmp/ros2-apt-source.deb; \
+    dpkg -i /tmp/ros2-apt-source.deb; \
+    rm -f /tmp/ros2-apt-source.deb
+
+# -------------------------------------------------
+# 4. Install ROS 2 Navigation, SLAM, EKF & Sensor Packages
+# -------------------------------------------------
+RUN apt-get update && \
+    apt-get install -y \
+        -o Dpkg::Options::="--force-overwrite" \
+        --no-install-recommends \
+        ros-humble-ros2cli \
+        ros-humble-ros2cli-common-extensions \
+        ros-humble-ros2topic \
+        ros-humble-ros2node \
+        ros-humble-ros2run \
+        ros-humble-ros2param \
+        ros-humble-ros2bag \
+        ros-humble-slam-toolbox \
+        ros-humble-robot-localization \
+        ros-humble-imu-tools \
+        ros-humble-nav2-map-server \
+        ros-humble-nav2-simple-commander \
+        ros-humble-nav2-bringup \
+        ros-humble-nav2-costmap-2d \
+        ros-humble-nav2-controller \
+        ros-humble-nav2-planner \
+        ros-humble-nav2-behaviors \
+        ros-humble-nav2-bt-navigator \
+        ros-humble-nav2-amcl \
+        ros-humble-eigen3-cmake-module \
+        ros-humble-tf2-geometry-msgs \
+        ros-humble-rplidar-ros \
+        ros-humble-v4l2-camera \
+        ros-humble-cv-bridge \
+        ros-humble-image-transport \
+        python3-colcon-common-extensions \
+        libeigen3-dev \
+        libopencv-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# -------------------------------------------------
+# 5. Install Python dependencies
+# -------------------------------------------------
+RUN python3 -m pip install \
+      --no-cache-dir \
+      Pillow \
+      pyserial \
+      numpy \
+      scipy \
+      pyyaml
+
+# -------------------------------------------------
+# 6. Build RF2O Laser Odometry from source
+# -------------------------------------------------
+RUN mkdir -p "${ROS_WS}/src" && \
+    git clone \
+      --depth 1 \
+      --branch ros2 \
+      https://github.com/MAPIRlab/rf2o_laser_odometry.git \
+      "${ROS_WS}/src/rf2o_laser_odometry"
+
+WORKDIR /workspace/rf2o_ws
+RUN source /opt/ros/humble/setup.bash && \
+    colcon build \
+      --symlink-install \
+      --event-handlers console_direct+
+
+# -------------------------------------------------
+# 7. Environment Auto-Sourcing
+# -------------------------------------------------
+RUN sed -i '/robot_ws/d' /root/.bashrc && \
+    printf '%s\n' \
+    'source /opt/ros/humble/setup.bash 2>/dev/null || true' \
+    'source /workspace/rf2o_ws/install/setup.bash 2>/dev/null || true' \
+    >> /root/.bashrc
+
+# -------------------------------------------------
+# 8. Copy Node and Configuration Files
+# -------------------------------------------------
+WORKDIR /workspace
+
+COPY monocular_vo_node.py    /workspace/monocular_vo_node.py
+COPY imu_node.py              /workspace/imu_node.py
+COPY cmd_vel_bridge.py        /workspace/cmd_vel_bridge.py
+COPY robot_manager.py         /workspace/robot_manager.py
+COPY test_sensors.py          /workspace/test_sensors.py
+COPY rf2o.launch.py           /workspace/rf2o.launch.py
+COPY ekf.yaml                 /workspace/ekf.yaml
+COPY nav2_params.yaml         /workspace/nav2_params.yaml
+COPY slam_toolbox_params.yaml /workspace/slam_toolbox_params.yaml
+COPY entrypoint.sh            /workspace/entrypoint.sh
+
+RUN chmod +x /workspace/*.py /workspace/entrypoint.sh && \
+    python3 -m py_compile /workspace/*.py
+
+# Web UI port for dynamic map & telemetry
+EXPOSE 8000
+
+CMD ["/bin/bash", "/workspace/entrypoint.sh"]
