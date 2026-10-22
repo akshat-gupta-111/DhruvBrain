@@ -212,20 +212,27 @@ class MonocularVisualOdometry(Node):
 
             quality = float(np.sum(mask)) / float(len(good_next))
 
-            # Publish debug image with tracked vectors
-            if self.debug_pub.get_subscription_count() > 0:
-                dbg = frame.copy()
+        # Publish debug image with tracked vectors (always publish so stream doesn't freeze)
+        if self.debug_pub.get_subscription_count() > 0:
+            dbg = frame.copy()
+            if E is not None and mask is not None and np.sum(mask) >= 8:
                 for p0, p1 in zip(inliers_prev[:40], inliers_next[:40]):
                     x0, y0 = int(p0[0]), int(p0[1])
                     x1, y1 = int(p1[0]), int(p1[1])
                     cv2.line(dbg, (x0, y0), (x1, y1), (0, 255, 0), 2)
                     cv2.circle(dbg, (x1, y1), 3, (0, 0, 255), -1)
-                cv2.putText(dbg, f"VO vx: {vx:+.2f} m/s wz: {wz:+.2f} rad/s", (10, 30),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
-                try:
-                    self.debug_pub.publish(self.bridge.cv2_to_imgmsg(dbg, encoding='bgr8'))
-                except Exception:
-                    pass
+                status_txt = f"VO vx: {vx:+.2f} m/s wz: {wz:+.2f} rad/s"
+            else:
+                if self.prev_pts is not None:
+                    for p in self.prev_pts[:40]:
+                        cv2.circle(dbg, (int(p[0][0]), int(p[0][1])), 3, (0, 255, 255), -1)
+                status_txt = "VO: Stationary / Ready (Tracking Keypoints)"
+
+            cv2.putText(dbg, status_txt, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+            try:
+                self.debug_pub.publish(self.bridge.cv2_to_imgmsg(dbg, encoding='bgr8'))
+            except Exception:
+                pass
 
         # Publish Odometry message with appropriate covariance
         self.publish_odometry(current_time, vx, vy, wz, quality)
