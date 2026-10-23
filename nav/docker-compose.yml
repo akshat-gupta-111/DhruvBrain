@@ -60,6 +60,7 @@ services:
       - ./imu_node.py:/workspace/imu_node.py
       - ./cmd_vel_bridge.py:/workspace/cmd_vel_bridge.py
       - ./robot_manager.py:/workspace/robot_manager.py
+      - ./odom_sign_fix.py:/workspace/odom_sign_fix.py
 
     expose:
       - "8000"
