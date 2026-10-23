@@ -1,6 +1,7 @@
 ekf_filter_node:
   ros__parameters:
-    frequency: 30.0
+    # Lowered from 30Hz to 15Hz - RF2O runs at 12Hz, no need to exceed it
+    frequency: 15.0
     sensor_timeout: 0.5
     two_d_mode: true
     transform_time_offset: 0.02
@@ -29,7 +30,6 @@ ekf_filter_node:
     odom0_queue_size: 10
 
     # Sensor 1: IMU - DISABLED (MPU6050 not wired yet)
-    # Uncomment imu0 block below once MPU6050 is connected to Jetson I2C
     # imu0: /imu/data
     # imu0_config: [false, false, false,
     #               true,  true,  false,
@@ -42,18 +42,20 @@ ekf_filter_node:
     # imu0_remove_gravitational_acceleration: true
 
     # Sensor 2: Monocular Visual Odometry
+    # NOTE: vyaw (index 11) set to FALSE - monocular VO angular velocity is too
+    # noisy without IMU and causes wild yaw drift. Only using vx (forward velocity).
     odom1: /vo/odom
     odom1_config: [false, false, false,
                    false, false, false,
                    true,  false, false,
-                   false, false, true,
+                   false, false, false,
                    false, false, false]
     odom1_differential: false
     odom1_relative: false
     odom1_queue_size: 10
 
-    # Process noise covariance Q matrix (15x15)
-    # Row 5 col 5 (yaw) = 0.15 (raised from 0.06 to reduce drift without IMU)
+    # Process noise covariance Q (15x15)
+    # [5,5] yaw = 0.15 to tolerate running without IMU yaw anchor
     process_noise_covariance: [
       0.05, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
       0.0,  0.05, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
