@@ -38,17 +38,9 @@ class OdomSignFix(Node):
             '(X and Y negated to correct 180-deg LiDAR mounting)')
 
     def cb(self, msg: Odometry):
-        # Negate X and Y position (missing 180-deg rotation from laser to base_link)
-        msg.pose.pose.position.x = -msg.pose.pose.position.x
-        msg.pose.pose.position.y = -msg.pose.pose.position.y
-
-        # Negate X and Y velocity (same correction for twist)
-        msg.twist.twist.linear.x = -msg.twist.twist.linear.x
-        msg.twist.twist.linear.y = -msg.twist.twist.linear.y
-
-        # Orientation (yaw quaternion) is already correctly reported in
-        # the base_link frame -- do NOT rotate it.
-
+        # RF2O correctly applies the laser->base_link 180-deg TF internally when the TF
+        # is available at startup (verified: raw x INCREASES when pushing robot forward).
+        # No sign correction needed -- relay unchanged to /rf2o/odom_fixed for EKF.
         self.pub.publish(msg)
 
 
