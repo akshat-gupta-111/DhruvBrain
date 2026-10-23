@@ -1,13 +1,6 @@
-### =============================================================================
-###  DHRUV NAVIGATION — Extended Kalman Filter (robot_localization) Configuration
-###  Active sensors: RF2O Laser Odometry + Monocular Visual Odometry
-###  IMU DISABLED: MPU6050 not yet wired. Re-enable imu0 block once connected.
-### =============================================================================
-
 ekf_filter_node:
   ros__parameters:
     frequency: 30.0
-    # Raised from 0.15 to 0.5 to avoid false timeouts when RF2O is slow at startup
     sensor_timeout: 0.5
     two_d_mode: true
     transform_time_offset: 0.02
@@ -20,14 +13,11 @@ ekf_filter_node:
     base_link_frame: base_link
     world_frame: odom
 
-    # robot_localization publishes the canonical odom -> base_link TF
     publish_tf: true
     publish_acceleration: false
 
-    # ---------------------------------------------------------------------------
     # Sensor 0: RF2O 2D Laser Odometry
-    # Matrix: [x, y, z, roll, pitch, yaw, vx, vy, vz, vroll, vpitch, vyaw, ax, ay, az]
-    # ---------------------------------------------------------------------------
+    # [x, y, z, roll, pitch, yaw, vx, vy, vz, vroll, vpitch, vyaw, ax, ay, az]
     odom0: /rf2o/odom
     odom0_config: [false, false, false,
                    false, false, false,
@@ -38,10 +28,8 @@ ekf_filter_node:
     odom0_relative: false
     odom0_queue_size: 10
 
-    # ---------------------------------------------------------------------------
-    # Sensor 1: 6-Axis IMU (MPU6050) - DISABLED until hardware is connected
-    # To re-enable: uncomment all imu0 lines below and connect MPU6050 to Jetson I2C
-    # ---------------------------------------------------------------------------
+    # Sensor 1: IMU - DISABLED (MPU6050 not wired yet)
+    # Uncomment imu0 block below once MPU6050 is connected to Jetson I2C
     # imu0: /imu/data
     # imu0_config: [false, false, false,
     #               true,  true,  false,
@@ -53,9 +41,7 @@ ekf_filter_node:
     # imu0_queue_size: 10
     # imu0_remove_gravitational_acceleration: true
 
-    # ---------------------------------------------------------------------------
-    # Sensor 2: Monocular Visual Odometry (/vo/odom)
-    # ---------------------------------------------------------------------------
+    # Sensor 2: Monocular Visual Odometry
     odom1: /vo/odom
     odom1_config: [false, false, false,
                    false, false, false,
@@ -66,8 +52,8 @@ ekf_filter_node:
     odom1_relative: false
     odom1_queue_size: 10
 
-    # Process noise covariance (Q)
-    # [5,5] = yaw raised from 0.06 to 0.15 to reduce drift when running without IMU
+    # Process noise covariance Q matrix (15x15)
+    # Row 5 col 5 (yaw) = 0.15 (raised from 0.06 to reduce drift without IMU)
     process_noise_covariance: [
       0.05, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
       0.0,  0.05, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
