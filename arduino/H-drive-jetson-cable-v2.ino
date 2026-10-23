@@ -76,16 +76,13 @@ const int SPEED_LIMIT = 180;
 const bool DEBUG = true;
 
 // Motor direction inversion flags
-// Layout confirmed: M1=Front-Left, M2=Back-Left, M3=Back-Right, M4=Front-Right
-// DERIVED from physical test observations:
-//   MIX(100,0,0) gave CW rotation  (was: L-fwd, R-bwd -> needs all inverted)
-//   MIX(0,0,100) gave backward     (was: all same direction -> confirms +PWM=backward)
-// Positive PWM = BACKWARD for ALL motors on this robot -> ALL must be inverted.
-// With all=true: MIX(100,0,0)->forward, MIX(0,0,100)->CCW, MIX(0,100,0)->strafe-left
-bool M1_INVERT = true;    // Front-Left
-bool M2_INVERT = true;    // Back-Left
-bool M3_INVERT = true;    // Back-Right  <- changed from false
-bool M4_INVERT = true;    // Front-Right <- changed from false
+// Layout: M1=Front-Left, M2=Back-Left, M3=Back-Right, M4=Front-Right
+// Confirmed working with physical tests: M1=F, M2=F, M3=T, M4=T
+bool M1_INVERT = false;
+bool M2_INVERT = false;
+bool M3_INVERT = true;
+bool M4_INVERT = true;
+
 
 bool testModeActive = false;
 
@@ -1135,33 +1132,19 @@ void stopAll()
 void mixDrive(int Vx, int Vy, int W)
 {
   // ==========================================================
-  // Confirmed motor layout (viewed from above, front at top):
-  //   M1 = Front-Left  (FL)    M4 = Front-Right (FR)
-  //   M2 = Back-Left   (BL)    M3 = Back-Right  (BR)
-  //
+  // Layout: M1=Front-Left, M2=Back-Left, M3=Back-Right, M4=Front-Right
   // ROS convention: +Vx=forward, +Vy=left, +W=counter-clockwise
-  // ALL motor INVERT flags = true (positive PWM = backward for all motors)
-  //
-  // O-CONFIGURATION Mecanum mixing (wheels mounted with rollers perpendicular
-  // to X-config). Derived from physical test results:
-  //   MIX(100,0,0) was ACW rotation  -> Vx and W were swapped in effect
-  //   MIX(0,0,100) was forward       -> confirmed O-config roller orientation
-  //   MIX(0,100,0) was jitter        -> Vy signs were wrong
-  //
-  //   FL (M1) = -Vx + Vy + W
-  //   BL (M2) = -Vx - Vy + W
-  //   BR (M3) = +Vx + Vy + W
-  //   FR (M4) = +Vx - Vy + W
-  //
-  // Verification:
-  //   Vx=+100 -> M1=-100, M2=-100, M3=+100, M4=+100 -> FORWARD
-  //   W=+100  -> all +100 -> all LPWM -> CCW rotation
-  //   Vy=+100 -> M1=+100, M2=-100, M3=+100, M4=-100 -> strafe LEFT
+  // Standard Mecanum (X-config) mixing - confirmed working with physical tests:
+  //   FL(M1) = Vx - Vy - W
+  //   BL(M2) = Vx + Vy - W
+  //   BR(M3) = Vx - Vy + W
+  //   FR(M4) = Vx + Vy + W
   // ==========================================================
-  float M1 = -Vx + Vy + W;   // Front-Left  (FL)
-  float M2 = -Vx - Vy + W;   // Back-Left   (BL)
-  float M3 = +Vx + Vy + W;   // Back-Right  (BR)
-  float M4 = +Vx - Vy + W;   // Front-Right (FR)
+  float M1 = Vx - Vy - W;   // Front-Left  (FL)
+  float M2 = Vx + Vy - W;   // Back-Left   (BL)
+  float M3 = Vx - Vy + W;   // Back-Right  (BR)
+  float M4 = Vx + Vy + W;   // Front-Right (FR)
+
 
   // Normalization - scale down proportionally if any motor exceeds SPEED_LIMIT
   float maxMag = max(max(fabs(M1), fabs(M2)), max(fabs(M3), fabs(M4)));
