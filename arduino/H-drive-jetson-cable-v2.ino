@@ -76,10 +76,18 @@ const int SPEED_LIMIT = 180;
 const bool DEBUG = true;
 
 // Motor direction inversion flags
-bool M1_INVERT = false;
-bool M2_INVERT = false;
-bool M3_INVERT = true;
-bool M4_INVERT = true;
+// NOTE: These must be re-calibrated after the mixDrive formula fix.
+// Use serial tokens (T1_100, T2_100, T3_100, T4_100) to test each motor individually.
+// If a motor spins the wrong direction, set its INVERT = true.
+// Standard Mecanum layout expectation (looking from above, front at top):
+//   M1 (Front-Left)  = typically INVERTED  (motor faces inward)
+//   M2 (Front-Right) = typically NOT inverted
+//   M3 (Rear-Left)   = typically INVERTED  (motor faces inward)
+//   M4 (Rear-Right)  = typically NOT inverted
+bool M1_INVERT = true;    // ← Verify with T1_100 test
+bool M2_INVERT = false;   // ← Verify with T2_100 test
+bool M3_INVERT = true;    // ← Verify with T3_100 test
+bool M4_INVERT = false;   // ← Verify with T4_100 test
 
 bool testModeActive = false;
 
@@ -1128,12 +1136,25 @@ void stopAll()
 
 void mixDrive(int Vx, int Vy, int W)
 {
-  float M1 = Vx - Vy - W;
-  float M4 = Vx + Vy + W;
-  float M2 = Vx + Vy - W;
-  float M3 = Vx - Vy + W;
+  // ==========================================================
+  // Standard Mecanum Layout (viewed from above, front = top):
+  //   M1 = Front-Left  (FL)    M2 = Front-Right (FR)
+  //   M3 = Rear-Left   (RL)    M4 = Rear-Right  (RR)
+  //
+  // ROS convention: +Vx=forward, +Vy=left, +W=counter-clockwise
+  //
+  // Canonical Mecanum mixing:
+  //   FL = Vx - Vy - W
+  //   FR = Vx + Vy + W
+  //   RL = Vx + Vy - W
+  //   RR = Vx - Vy + W
+  // ==========================================================
+  float M1 = Vx - Vy - W;   // Front-Left
+  float M2 = Vx + Vy + W;   // Front-Right
+  float M3 = Vx + Vy - W;   // Rear-Left
+  float M4 = Vx - Vy + W;   // Rear-Right
 
-  // Normalization
+  // Normalization — scale down proportionally if any motor exceeds SPEED_LIMIT
   float maxMag = max(max(fabs(M1), fabs(M2)), max(fabs(M3), fabs(M4)));
 
   if (maxMag > SPEED_LIMIT)
@@ -1156,8 +1177,8 @@ void mixDrive(int Vx, int Vy, int W)
     if (millis() - lastMixDebugTime > 1000)
     {
       String line = "MIX Vx=" + String(Vx) + " Vy=" + String(Vy) + " W=" + String(W) +
-                    " -> M1=" + String((int)M1) + " M2=" + String((int)M2) +
-                    " M3=" + String((int)M3) + " M4=" + String((int)M4);
+                    " -> M1(FL)=" + String((int)M1) + " M2(FR)=" + String((int)M2) +
+                    " M3(RL)=" + String((int)M3) + " M4(RR)=" + String((int)M4);
       logOut(line);
       lastMixDebugTime = millis();
     }

@@ -125,7 +125,7 @@ class CmdVelBridge(Node):
         else:
             is_active_move = True
             vx = int(round((x / MAX_LINEAR) * MAX_PWM))
-            vy = int(round((y / MAX_LINEAR) * MAX_PWM))
+            vy = int(round((y / MAX_Y) * MAX_PWM))          # Use MAX_Y, not MAX_LINEAR
             w = int(round((z / MAX_Z) * MAX_PWM))
 
             largest_component = max(abs(vx), abs(vy), abs(w))
