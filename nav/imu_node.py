@@ -104,9 +104,8 @@ class IMUDriverNode(Node):
         """Attempts connection via direct Jetson I2C bus first, then serial USB."""
         while self.running and not self.device_connected:
             # 1. Check all Jetson Orin Nano I2C buses.
-            # Pins 3(SDA)/5(SCL) on Orin Nano map to i2c-2 (not i2c-1).
-            # Scanning all buses for auto-detection regardless of JetPack version.
-            for bus_path in ['/dev/i2c-2', '/dev/i2c-1', '/dev/i2c-7',
+            # MPU6050 confirmed on i2c-7 (Jetson Orin Nano pins 3/5 mapping).
+            for bus_path in ['/dev/i2c-7', '/dev/i2c-2', '/dev/i2c-1',
                              '/dev/i2c-0', '/dev/i2c-4', '/dev/i2c-5', '/dev/i2c-9']:
                 if os.path.exists(bus_path):
                     if self.try_init_mpu6050_i2c(bus_path):

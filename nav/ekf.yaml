@@ -30,20 +30,19 @@ ekf_filter_node:
     odom0_relative: false
     odom0_queue_size: 10
 
-    # Sensor 1: MPU6050 IMU (connected to Jetson I2C pins 3/5)
-    # DISABLED: MPU6050 not detected on i2c buses yet (pinmux config needed).
-    # Re-enable after running: sudo /opt/nvidia/jetson-io/jetson-io.py
-    # and confirming: sudo i2cdetect -y 1  shows 0x68
-    # imu0: /imu/data
-    # imu0_config: [false, false, false,
-    #               true,  true,  true,
-    #               false, false, false,
-    #               false, false, true,
-    #               false, false, false]
-    # imu0_differential: false
-    # imu0_relative: true
-    # imu0_queue_size: 10
-    # imu0_remove_gravitational_acceleration: true
+    # Sensor 1: MPU6050 IMU (confirmed on /dev/i2c-7, address 0x68)
+    # Provides orientation (roll,pitch,yaw) and yaw-rate to anchor heading.
+    # [x, y, z, roll, pitch, yaw, vx, vy, vz, vroll, vpitch, vyaw, ax, ay, az]
+    imu0: /imu/data
+    imu0_config: [false, false, false,
+                  true,  true,  true,
+                  false, false, false,
+                  false, false, true,
+                  false, false, false]
+    imu0_differential: false
+    imu0_relative: true
+    imu0_queue_size: 10
+    imu0_remove_gravitational_acceleration: true
 
     # Sensor 2: Monocular Visual Odometry
     # NOTE: vyaw (index 11) set to FALSE - monocular VO angular velocity is too
