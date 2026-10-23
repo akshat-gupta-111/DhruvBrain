@@ -77,13 +77,15 @@ const bool DEBUG = true;
 
 // Motor direction inversion flags
 // Layout confirmed: M1=Front-Left, M2=Back-Left, M3=Back-Right, M4=Front-Right
-// Left-side motors (M1, M2) face opposite direction to right-side motors -> inverted.
-// VERIFY each with serial test tokens: T1_100, T2_100, T3_100, T4_100
-// If a motor spins BACKWARDS from expected, flip its INVERT flag.
-bool M1_INVERT = true;    // Front-Left  (left side) <- verify with T1_100
-bool M2_INVERT = true;    // Back-Left   (left side) <- verify with T2_100
-bool M3_INVERT = false;   // Back-Right  (right side) <- verify with T3_100
-bool M4_INVERT = false;   // Front-Right (right side) <- verify with T4_100
+// DERIVED from physical test observations:
+//   MIX(100,0,0) gave CW rotation  (was: L-fwd, R-bwd -> needs all inverted)
+//   MIX(0,0,100) gave backward     (was: all same direction -> confirms +PWM=backward)
+// Positive PWM = BACKWARD for ALL motors on this robot -> ALL must be inverted.
+// With all=true: MIX(100,0,0)->forward, MIX(0,0,100)->CCW, MIX(0,100,0)->strafe-left
+bool M1_INVERT = true;    // Front-Left
+bool M2_INVERT = true;    // Back-Left
+bool M3_INVERT = true;    // Back-Right  <- changed from false
+bool M4_INVERT = true;    // Front-Right <- changed from false
 
 bool testModeActive = false;
 
