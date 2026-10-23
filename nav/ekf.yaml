@@ -1,12 +1,14 @@
 ### =============================================================================
-###  DHRUV NAVIGATION â€” Extended Kalman Filter (robot_localization) Configuration
-###  Fuses RF2O Laser Odometry, 6-Axis IMU, and Monocular Visual Odometry
+###  DHRUV NAVIGATION — Extended Kalman Filter (robot_localization) Configuration
+###  Active sensors: RF2O Laser Odometry + Monocular Visual Odometry
+###  IMU DISABLED: MPU6050 not yet wired. Re-enable imu0 block once connected.
 ### =============================================================================
 
 ekf_filter_node:
   ros__parameters:
     frequency: 30.0
-    sensor_timeout: 0.15
+    # Raised from 0.15 to 0.5 to avoid false timeouts when RF2O is slow at startup
+    sensor_timeout: 0.5
     two_d_mode: true
     transform_time_offset: 0.02
     transform_timeout: 0.0
@@ -29,26 +31,27 @@ ekf_filter_node:
     odom0: /rf2o/odom
     odom0_config: [false, false, false,
                    false, false, false,
-                   true,  true,  false,   # vx, vy (planar motion)
-                   false, false, true,    # vyaw (yaw angular velocity)
+                   true,  true,  false,
+                   false, false, true,
                    false, false, false]
     odom0_differential: false
     odom0_relative: false
     odom0_queue_size: 10
 
     # ---------------------------------------------------------------------------
-    # Sensor 1: 6-Axis IMU (Madgwick Filtered)
+    # Sensor 1: 6-Axis IMU (MPU6050) - DISABLED until hardware is connected
+    # To re-enable: uncomment all imu0 lines below and connect MPU6050 to Jetson I2C
     # ---------------------------------------------------------------------------
-    imu0: /imu/data
-    imu0_config: [false, false, false,
-                  true,  true,  false,   # roll, pitch (ensures robot stays level)
-                  false, false, false,
-                  false, false, true,    # vyaw (high-bandwidth gyro yaw rate)
-                  false, false, false]
-    imu0_differential: false
-    imu0_relative: true
-    imu0_queue_size: 10
-    imu0_remove_gravitational_acceleration: true
+    # imu0: /imu/data
+    # imu0_config: [false, false, false,
+    #               true,  true,  false,
+    #               false, false, false,
+    #               false, false, true,
+    #               false, false, false]
+    # imu0_differential: false
+    # imu0_relative: true
+    # imu0_queue_size: 10
+    # imu0_remove_gravitational_acceleration: true
 
     # ---------------------------------------------------------------------------
     # Sensor 2: Monocular Visual Odometry (/vo/odom)
@@ -56,21 +59,22 @@ ekf_filter_node:
     odom1: /vo/odom
     odom1_config: [false, false, false,
                    false, false, false,
-                   true,  false, false,   # vx (forward visual velocity)
-                   false, false, true,    # vyaw (visual angular velocity)
+                   true,  false, false,
+                   false, false, true,
                    false, false, false]
     odom1_differential: false
     odom1_relative: false
     odom1_queue_size: 10
 
     # Process noise covariance (Q)
+    # [5,5] = yaw raised from 0.06 to 0.15 to reduce drift when running without IMU
     process_noise_covariance: [
       0.05, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
       0.0,  0.05, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
       0.0,  0.0,  0.06, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
       0.0,  0.0,  0.0,  0.03, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
       0.0,  0.0,  0.0,  0.0,  0.03, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
-      0.0,  0.0,  0.0,  0.0,  0.0,  0.06, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+      0.0,  0.0,  0.0,  0.0,  0.0,  0.15, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
       0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.025,0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
       0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.025,0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
       0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.04, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,

@@ -33,8 +33,9 @@ trap cleanup EXIT INT TERM
 # -----------------------------------------------------------------------------
 echo "[1/8] Broadcasting robot static transforms..."
 
-# base_link -> laser (LiDAR mounted 1.6m above ground center)
-ros2 run tf2_ros static_transform_publisher 0 0 1.6 0 0 0 base_link laser >/dev/null 2>&1 &
+# base_link -> laser (LiDAR mounted 1.6m above ground center, PHYSICALLY FACING BACKWARDS)
+# Confirmed by scan test: hand in front of robot appeared at 162° → 180° yaw correction applied.
+ros2 run tf2_ros static_transform_publisher 0 0 1.6 3.14159 0 0 base_link laser >/dev/null 2>&1 &
 TF_LASER_PID=$!
 
 # base_link -> imu_link (IMU mounted near center 10cm up)
