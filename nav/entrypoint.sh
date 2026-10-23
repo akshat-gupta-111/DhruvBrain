@@ -34,20 +34,22 @@ trap cleanup EXIT INT TERM
 echo "[1/8] Broadcasting robot static transforms..."
 
 # base_link -> laser (LiDAR mounted 1.6m above ground center, PHYSICALLY FACING BACKWARDS)
-# Confirmed by scan test: hand in front of robot appeared at 162° → 180° yaw correction applied.
-ros2 run tf2_ros static_transform_publisher 0 0 1.6 3.14159 0 0 base_link laser >/dev/null 2>&1 &
+# Confirmed by scan test: hand in front of robot appeared at 162 deg -> 180 deg yaw correction.
+# ROS 2 quaternion format: x y z  qx qy qz qw  parent child
+# 180 deg yaw = quaternion (qx=0, qy=0, qz=1.0, qw=0.0)
+ros2 run tf2_ros static_transform_publisher 0 0 1.6 0 0 1.0 0.0 base_link laser >/dev/null 2>&1 &
 TF_LASER_PID=$!
 
-# base_link -> imu_link (IMU mounted near center 10cm up)
-ros2 run tf2_ros static_transform_publisher 0 0 0.1 0 0 0 base_link imu_link >/dev/null 2>&1 &
+# base_link -> imu_link (IMU mounted near center 10cm up, identity orientation)
+ros2 run tf2_ros static_transform_publisher 0 0 0.1 0 0 0 1.0 base_link imu_link >/dev/null 2>&1 &
 TF_IMU_PID=$!
 
-# base_link -> camera_link (Camera mounted 20cm forward, 85cm up)
-ros2 run tf2_ros static_transform_publisher 0.2 0 0.85 0 0 0 base_link camera_link >/dev/null 2>&1 &
+# base_link -> camera_link (Camera mounted 20cm forward, 85cm up, identity orientation)
+ros2 run tf2_ros static_transform_publisher 0.2 0 0.85 0 0 0 1.0 base_link camera_link >/dev/null 2>&1 &
 TF_CAM_PID=$!
 
-# base_link -> base_footprint (Ground plane projection)
-ros2 run tf2_ros static_transform_publisher 0 0 0 0 0 0 base_link base_footprint >/dev/null 2>&1 &
+# base_link -> base_footprint (Ground plane projection, identity orientation)
+ros2 run tf2_ros static_transform_publisher 0 0 0 0 0 0 1.0 base_link base_footprint >/dev/null 2>&1 &
 TF_FOOTPRINT_PID=$!
 
 sleep 1
