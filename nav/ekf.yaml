@@ -17,9 +17,10 @@ ekf_filter_node:
     publish_tf: true
     publish_acceleration: false
 
-    # Sensor 0: RF2O 2D Laser Odometry
+    # Sensor 0: RF2O 2D Laser Odometry (direction-corrected via odom_sign_fix.py)
+    # Raw /rf2o/odom has X negated due to 180-deg LiDAR TF; /rf2o/odom_fixed corrects this.
     # [x, y, z, roll, pitch, yaw, vx, vy, vz, vroll, vpitch, vyaw, ax, ay, az]
-    odom0: /rf2o/odom
+    odom0: /rf2o/odom_fixed
     odom0_config: [false, false, false,
                    false, false, false,
                    true,  true,  false,

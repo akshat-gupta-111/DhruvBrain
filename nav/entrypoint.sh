@@ -21,7 +21,7 @@ cleanup() {
     echo ""
     echo "[SHUTDOWN] Stopping all navigation and SLAM processes..."
     kill "$NAV2_PID" "$SLAM_PID" "$AMCL_PID" "$MAP_SERVER_PID" "$BRIDGE_PID" \
-         "$EKF_PID" "$RF2O_PID" "$VO_PID" "$IMU_PID" "$LIDAR_PID" \
+         "$EKF_PID" "$RF2O_PID" "$ODOM_FIX_PID" "$VO_PID" "$IMU_PID" "$LIDAR_PID" \
          "$TF_LASER_PID" "$TF_IMU_PID" "$TF_CAM_PID" "$TF_FOOTPRINT_PID" 2>/dev/null || true
     wait 2>/dev/null || true
     echo "[SHUTDOWN] Clean exit complete."
@@ -150,6 +150,17 @@ RF2O_LAUNCH="/workspace/rf2o.launch.py"
 
 ros2 launch "$RF2O_LAUNCH" >/tmp/rf2o.log 2>&1 &
 RF2O_PID=$!
+
+# -----------------------------------------------------------------------------
+# STEP 5b — RF2O Odom Direction Fix
+# RF2O computes displacement in the laser frame (facing backward) without
+# applying the 180-deg TF rotation. odom_sign_fix.py negates X,Y to correct
+# this. Result: /rf2o/odom_fixed is used by EKF instead of raw /rf2o/odom.
+# -----------------------------------------------------------------------------
+ODOM_FIX_SCRIPT="/workspace/odom_sign_fix.py"
+[ -f /workspace/src_live/odom_sign_fix.py ] && ODOM_FIX_SCRIPT="/workspace/src_live/odom_sign_fix.py"
+python3 "$ODOM_FIX_SCRIPT" >/tmp/odom_fix.log 2>&1 &
+ODOM_FIX_PID=$!
 
 sleep 3
 
