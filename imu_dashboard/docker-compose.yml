@@ -1,0 +1,21 @@
+services:
+  imu-dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: imu-dashboard
+    restart: unless-stopped
+    network_mode: host
+    privileged: true
+    devices:
+      - "/dev/i2c-7:/dev/i2c-7"
+    environment:
+      - IMU_I2C_BUS=${IMU_I2C_BUS:-7}
+      - IMU_I2C_ADDRESS=${IMU_I2C_ADDRESS:-0x68}
+      - IMU_SAMPLE_HZ=${IMU_SAMPLE_HZ:-50}
+      - IMU_DASHBOARD_PORT=${IMU_DASHBOARD_PORT:-6769}
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.environ.get('IMU_DASHBOARD_PORT', '6769') + '/', timeout=3)\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3

@@ -25,25 +25,43 @@ sudo i2cdetect -y 1
 
 The MPU6050 commonly appears at `0x68` (sometimes `0x69` if AD0 is high). Do not assume bus 1 is correct; check the device tree and wiring on your particular Jetson Orin carrier board.
 
-## 2. Install and run
+## 2. Install and run independently
+
+The dashboard is a standalone service. It is not part of the root `dhruv-brain`
+Compose service and does not depend on the brain, navigation, or SLAM
+containers.
+
+From the repository's `imu_dashboard` directory on the Jetson:
+
+```bash
+cd ~/DhruvBrain/imu_dashboard
+sudo docker compose up -d --build
+```
+
+View logs:
+
+```bash
+sudo docker compose logs -f imu-dashboard
+```
+
+Open on the Jetson itself at `http://localhost:6769`, or from another device on the same network at `http://JETSON_IP:6769`.
+
+To stop only the dashboard:
+
+```bash
+sudo docker compose down
+```
+
+For a non-container install, the required packages are:
 
 ```bash
 sudo apt update
 sudo apt install -y python3-pip python3-venv i2c-tools
-mkdir -p ~/robot-dashboard
-cd ~/robot-dashboard
-```
-
-Copy this project into that directory, then:
-
-```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 python app.py
 ```
-
-Open on the Jetson itself at `http://localhost:6769`, or from another device on the same network at `http://JETSON_IP:6769`.
 
 If I²C permission is denied, test once with `sudo` to confirm the cause, then configure the appropriate I²C device permissions for your system rather than running the web server as root permanently.
 
