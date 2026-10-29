@@ -160,6 +160,36 @@ class IMUDriverNode(Node):
             return
 
         dt_target = 1.0 / self.freq
+
+        # ------------------------------------------------------------------
+        # GYRO BIAS CALIBRATION — collect 100 samples (~2s) at rest.
+        # Robot MUST be stationary during the first 2 seconds after startup.
+        # The average gyro reading is subtracted from all future readings.
+        # ------------------------------------------------------------------
+        self.get_logger().info("[IMU] Calibrating gyro bias (keep robot still for 2s)...")
+        bias_gx, bias_gy, bias_gz = 0.0, 0.0, 0.0
+        n_calib = 100
+        collected = 0
+        while collected < n_calib and self.running:
+            try:
+                os.write(fd, bytes([0x3B]))
+                raw_cal = os.read(fd, 14)
+                if len(raw_cal) == 14:
+                    r = struct.unpack('>7h', raw_cal)
+                    bias_gx += math.radians(r[4] / 131.0)
+                    bias_gy += -math.radians(r[5] / 131.0)  # upside-down correction
+                    bias_gz += -math.radians(r[6] / 131.0)  # upside-down correction
+                    collected += 1
+            except Exception:
+                pass
+            time.sleep(0.02)
+        if collected > 0:
+            bias_gx /= collected
+            bias_gy /= collected
+            bias_gz /= collected
+        self.get_logger().info(
+            f"[IMU] Gyro bias calibrated: gx={bias_gx:.4f} gy={bias_gy:.4f} gz={bias_gz:.4f} rad/s")
+
         while self.running:
             t0 = time.time()
             try:
@@ -192,6 +222,11 @@ class IMUDriverNode(Node):
                     az = -az
                     gy = -gy
                     gz = -gz
+
+                    # Subtract calibrated gyro bias
+                    gx -= bias_gx
+                    gy -= bias_gy
+                    gz -= bias_gz
 
                     now = time.time()
                     dt = max(now - self.last_update_time, 0.001)
