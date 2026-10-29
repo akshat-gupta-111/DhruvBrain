@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Robot Digital Twin | IMU Live</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <script type="importmap">
+    {"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}
+  </script>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark">DT</div>
+        <div><div class="eyebrow">DIGITAL TWIN / LIVE TELEMETRY</div><h1>Robot Dashboard</h1></div>
+      </div>
+      <div class="top-status"><span id="status-dot" class="dot"></span><span id="status-text">Connecting to Jetson…</span><span class="divider"></span><span class="port">PORT {{ dashboard_port }}</span></div>
+    </header>
+
+    <main class="layout">
+      <section class="panel model-panel">
+        <div class="panel-heading">
+          <div><div class="eyebrow">LIVE MODEL</div><h2>Robot orientation</h2></div>
+          <span class="live-pill"><span class="live-pulse"></span> LIVE</span>
+        </div>
+        <div class="model-stage" id="model-stage">
+          <div class="axis-hint">X <span>·</span> Y <span>·</span> Z</div>
+          <div class="model-label top-label">66 cm <span>HEIGHT</span></div>
+          <div class="sensor-callout"><span class="sensor-dot" aria-hidden="true"></span><div><strong>IMU SENSOR</strong><small>38 cm from ground</small></div></div>
+          <div class="bottom-label">Ø 22 cm <span>CYLINDER DIAMETER</span></div>
+          <div class="model-help">Drag to inspect · model rotates with the physical robot</div>
+          <canvas id="robot-canvas"></canvas>
+        </div>
+        <div class="model-legend">
+          <div><span class="legend-dot red"></span> IMU location <b>38 cm</b></div>
+          <div><span class="legend-dot cyan"></span> Transparent cylinder</div>
+          <div class="legend-note">Scale reference: 66 cm × Ø 22 cm</div>
+        </div>
+      </section>
+
+      <section class="right-column">
+        <section class="panel orientation-panel">
+          <div class="panel-heading"><div><div class="eyebrow">ORIENTATION</div><h2>Live attitude</h2></div><span class="mini-label">DEGREES</span></div>
+          <div class="angle-grid">
+            <div class="angle-card"><span>ROLL</span><strong id="roll">0.00<span>°</span></strong><div class="meter"><i id="roll-meter"></i></div></div>
+            <div class="angle-card"><span>PITCH</span><strong id="pitch">0.00<span>°</span></strong><div class="meter"><i id="pitch-meter"></i></div></div>
+            <div class="angle-card"><span>YAW*</span><strong id="yaw">0.00<span>°</span></strong><div class="meter"><i id="yaw-meter"></i></div></div>
+          </div>
+          <p class="subtle">*Yaw is integrated from gyro Z and may drift. No Kalman or smoothing filter is used.</p>
+        </section>
+
+        <section class="panel telemetry-panel">
+          <div class="panel-heading"><div><div class="eyebrow">RAW TELEMETRY</div><h2>IMU readings</h2></div><span class="mini-label">LIVE STREAM</span></div>
+          <div class="telemetry-grid">
+            <div class="telemetry-cell"><span>ACCEL X</span><b id="ax">0.0000 <small>g</small></b></div>
+            <div class="telemetry-cell"><span>ACCEL Y</span><b id="ay">0.0000 <small>g</small></b></div>
+            <div class="telemetry-cell"><span>ACCEL Z</span><b id="az">0.0000 <small>g</small></b></div>
+            <div class="telemetry-cell"><span>GYRO X</span><b id="gx">0.00 <small>°/s</small></b></div>
+            <div class="telemetry-cell"><span>GYRO Y</span><b id="gy">0.00 <small>°/s</small></b></div>
+            <div class="telemetry-cell"><span>GYRO Z</span><b id="gz">0.00 <small>°/s</small></b></div>
+          </div>
+          <div class="telemetry-footer"><span>Last sample</span><b id="sample-time">Waiting for data…</b></div>
+        </section>
+      </section>
+
+      <section class="panel terminal-panel">
+        <div class="panel-heading terminal-heading"><div><div class="eyebrow">SYSTEM CONSOLE</div><h2>IMU terminal</h2></div><div class="terminal-actions"><span id="log-count">0 lines</span><button id="clear-logs" type="button">CLEAR VIEW</button></div></div>
+        <div class="terminal-window" id="terminal" aria-live="polite">
+          <div class="terminal-line muted">Waiting for Jetson telemetry logs…</div>
+        </div>
+        <div class="terminal-footer"><span><i class="green-dot"></i> SOCKET STREAM</span><span id="terminal-state">INITIALIZING</span></div>
+      </section>
+    </main>
+    <footer>JETSON ORIN · I²C IMU · RAW SENSOR VIEW <span>NO KALMAN FILTER</span></footer>
+  </div>
+  <script>
+    window.INITIAL_LOGS = {{ initial_logs|tojson }};
+  </script>
+  <script type="module" src="/static/dashboard.js"></script>
+</body>
+</html>
