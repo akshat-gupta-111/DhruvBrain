@@ -234,41 +234,36 @@ def sensor_loop():
         f"I2C bus: {I2C_BUS_PREFERENCE}"
     )
 
-    try:
-        if SIMULATE:
-            log(
-                "Simulation mode is active. "
-                "No physical sensor data is being read.",
-                "WARN"
-            )
-
-        else:
-            bus, bus_number, who_am_i = (
-                discover_mpu6050_bus()
-            )
-
-            latest["source"] = f"I2C bus {bus_number}"
-
-            log(
-                f"I2C connection ready: "
-                f"bus={bus_number}, "
-                f"address=0x{IMU_ADDRESS:02X}, "
-                f"WHO_AM_I=0x{who_am_i:02X}"
-            )
-
-        latest["connected"] = True
-
-        socketio.emit(
-            "status",
-            {
-                "connected": True,
-                "source": latest["source"]
-            }
+    if SIMULATE:
+        log(
+            "Simulation mode is active. "
+            "No physical sensor data is being read.",
+            "WARN"
         )
 
-        log("IMU connection ready.")
+    while not stop_event.is_set():
+        try:
+            if bus is None and not SIMULATE:
+                bus, bus_number, who_am_i = discover_mpu6050_bus()
+                latest["source"] = f"I2C bus {bus_number}"
+                log(
+                    f"I2C connection ready: "
+                    f"bus={bus_number}, "
+                    f"address=0x{IMU_ADDRESS:02X}, "
+                    f"WHO_AM_I=0x{who_am_i:02X}"
+                )
 
-        while not stop_event.is_set():
+            if not latest["connected"]:
+                latest["connected"] = True
+                socketio.emit(
+                    "status",
+                    {
+                        "connected": True,
+                        "source": latest["source"]
+                    }
+                )
+                log("IMU connection ready.")
+
             now = time.monotonic()
             dt = max(
                 0.0,
@@ -357,33 +352,42 @@ def sensor_loop():
 
             time.sleep(1.0 / SAMPLE_HZ)
 
-    except Exception as exc:
-        latest["connected"] = False
+        except Exception as exc:
+            if bus is not None:
+                try:
+                    bus.close()
+                except Exception:
+                    pass
+                bus = None
 
-        socketio.emit(
-            "status",
-            {
-                "connected": False,
-                "source": latest["source"]
-            }
-        )
+            was_connected = latest["connected"]
+            latest["connected"] = False
+            socketio.emit(
+                "status",
+                {
+                    "connected": False,
+                    "source": latest["source"]
+                }
+            )
 
-        log(f"IMU ERROR: {exc}", "ERROR")
+            log(
+                f"IMU {'disconnected' if was_connected else 'not ready'}: "
+                f"{exc}",
+                "ERROR"
+            )
+            log(
+                "Retrying the Jetson pin 3/5 I2C connection in 3 seconds.",
+                "WARN"
+            )
+            stop_event.wait(3.0)
 
-        log(
-            "Check the physical I2C pins, bus number, "
-            "sensor address, power and permissions.",
-            "WARN"
-        )
+    if bus is not None:
+        try:
+            bus.close()
+        except Exception:
+            pass
 
-    finally:
-        if bus is not None:
-            try:
-                bus.close()
-            except Exception:
-                pass
-
-        log("IMU worker stopped.")
+    log("IMU worker stopped.")
 
 
 @app.route("/")
