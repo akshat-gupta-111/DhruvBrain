@@ -8,6 +8,7 @@ services:
     network_mode: host
     privileged: true
     devices:
+      # Jetson physical pin 3 (SDA) and pin 5 (SCL) are /dev/i2c-7.
       - "/dev/i2c-7:/dev/i2c-7"
     environment:
       - IMU_I2C_BUS=${IMU_I2C_BUS:-7}

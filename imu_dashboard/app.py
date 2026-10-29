@@ -15,7 +15,14 @@ except ImportError:
 
 HOST = "0.0.0.0"
 PORT = int(os.getenv("IMU_DASHBOARD_PORT", "6769"))
-I2C_BUS_PREFERENCE = os.getenv("IMU_I2C_BUS", "7").strip().lower()
+# Jetson 40-pin header: physical pin 3 = SDA, physical pin 5 = SCL.
+# The Jetson kernel exposes that header bus to userspace as /dev/i2c-7.
+JETSON_SDA_PIN = 3
+JETSON_SCL_PIN = 5
+JETSON_I2C_BUS = 7
+I2C_BUS_PREFERENCE = os.getenv(
+    "IMU_I2C_BUS", str(JETSON_I2C_BUS)
+).strip().lower()
 IMU_ADDRESS = int(os.getenv("IMU_I2C_ADDRESS", "0x68"), 0)
 SAMPLE_HZ = max(1.0, float(os.getenv("IMU_SAMPLE_HZ", "50")))
 SIMULATE = os.getenv("IMU_SIMULATE", "0").lower() in (
@@ -109,7 +116,7 @@ def discover_mpu6050_bus():
         )
 
     if I2C_BUS_PREFERENCE == "auto":
-        preferred_buses = [7]
+        preferred_buses = [JETSON_I2C_BUS]
     else:
         try:
             preferred_buses = [
@@ -128,23 +135,13 @@ def discover_mpu6050_bus():
         if name.isdigit():
             available_buses.append(int(name))
 
+    buses_to_check = preferred_buses
+
     if I2C_BUS_PREFERENCE == "auto":
-        buses_to_check = (
-            preferred_buses
-            + sorted(
-                number
-                for number in set(available_buses)
-                if number not in preferred_buses
-            )
-        )
-    else:
-        buses_to_check = (
-            preferred_buses
-            + sorted(
-                number
-                for number in set(available_buses)
-                if number not in preferred_buses
-            )
+        buses_to_check += sorted(
+            number
+            for number in set(available_buses)
+            if number not in preferred_buses
         )
 
     errors = []
@@ -232,7 +229,9 @@ def sensor_loop():
 
     log(
         "IMU worker starting. "
-        f"Preferred I2C bus: {I2C_BUS_PREFERENCE}"
+        f"Jetson header pins: SDA={JETSON_SDA_PIN}, "
+        f"SCL={JETSON_SCL_PIN}; "
+        f"I2C bus: {I2C_BUS_PREFERENCE}"
     )
 
     try:

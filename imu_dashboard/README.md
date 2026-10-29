@@ -16,14 +16,29 @@ This version targets the **MPU6050** on I²C. If your IMU is a different model, 
 
 ## 1. Check Jetson I²C
 
-Connect SDA, SCL, GND, and the correct sensor supply. Use the voltage level required by your breakout board. On Jetson, check which I²C bus is enabled and available:
+Connect the MPU6050 as follows:
+
+| MPU6050 | Jetson physical header |
+| --- | --- |
+| SDA | Pin 3 (I²C SDA) |
+| SCL | Pin 5 (I²C SCL) |
+| GND | Any Jetson GND pin |
+| VCC | The voltage required by your breakout board |
+
+Pins 3 and 5 are I²C signals, not GPIO pins. The Jetson kernel exposes this
+physical I²C connection to Python as `/dev/i2c-7`; `app.py` opens that device
+through `smbus2`. The dashboard container passes `/dev/i2c-7` through from the
+Jetson host.
+
+Check that the bus is enabled and available:
 
 ```bash
 ls /dev/i2c-*
-sudo i2cdetect -y 1
+sudo i2cdetect -y 7
 ```
 
-The MPU6050 commonly appears at `0x68` (sometimes `0x69` if AD0 is high). Do not assume bus 1 is correct; check the device tree and wiring on your particular Jetson Orin carrier board.
+The MPU6050 commonly appears at `0x68` (sometimes `0x69` if AD0 is high).
+The dashboard defaults to bus 7 and address `0x68`.
 
 ## 2. Install and run independently
 
@@ -67,7 +82,9 @@ If I²C permission is denied, test once with `sudo` to confirm the cause, then c
 
 ## 3. Configure bus/address
 
-Defaults are I²C bus `7`, address `0x68`, and 50 samples/second. Override them if needed:
+Defaults are the physical pin 3/5 I²C connection (`/dev/i2c-7`), address
+`0x68`, and 50 samples/second. Override the bus only if your carrier board
+maps those header pins differently:
 
 ```bash
 IMU_I2C_BUS=7 IMU_I2C_ADDRESS=0x69 IMU_SAMPLE_HZ=50 IMU_DASHBOARD_PORT=6769 python app.py
