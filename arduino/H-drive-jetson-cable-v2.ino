@@ -76,13 +76,10 @@ const int SPEED_LIMIT = 180;
 const bool DEBUG = true;
 
 // Motor direction inversion flags
-// Layout: M1=Front-Left, M2=Back-Left, M3=Back-Right, M4=Front-Right
-// Confirmed working with physical tests: M1=F, M2=F, M3=T, M4=T
 bool M1_INVERT = false;
 bool M2_INVERT = false;
 bool M3_INVERT = true;
 bool M4_INVERT = true;
-
 
 bool testModeActive = false;
 
@@ -1131,22 +1128,12 @@ void stopAll()
 
 void mixDrive(int Vx, int Vy, int W)
 {
-  // ==========================================================
-  // Layout: M1=Front-Left, M2=Back-Left, M3=Back-Right, M4=Front-Right
-  // ROS convention: +Vx=forward, +Vy=left, +W=counter-clockwise
-  // Standard Mecanum (X-config) mixing - confirmed working with physical tests:
-  //   FL(M1) = Vx - Vy - W
-  //   BL(M2) = Vx + Vy - W
-  //   BR(M3) = Vx - Vy + W
-  //   FR(M4) = Vx + Vy + W
-  // ==========================================================
-  float M1 = Vx - Vy - W;   // Front-Left  (FL)
-  float M2 = Vx + Vy - W;   // Back-Left   (BL)
-  float M3 = Vx - Vy + W;   // Back-Right  (BR)
-  float M4 = Vx + Vy + W;   // Front-Right (FR)
+  float M1 = Vx - Vy - W;
+  float M4 = Vx + Vy + W;
+  float M2 = Vx + Vy - W;
+  float M3 = Vx - Vy + W;
 
-
-  // Normalization - scale down proportionally if any motor exceeds SPEED_LIMIT
+  // Normalization
   float maxMag = max(max(fabs(M1), fabs(M2)), max(fabs(M3), fabs(M4)));
 
   if (maxMag > SPEED_LIMIT)
@@ -1169,8 +1156,8 @@ void mixDrive(int Vx, int Vy, int W)
     if (millis() - lastMixDebugTime > 1000)
     {
       String line = "MIX Vx=" + String(Vx) + " Vy=" + String(Vy) + " W=" + String(W) +
-                    " -> M1(FL)=" + String((int)M1) + " M2(BL)=" + String((int)M2) +
-                    " M3(BR)=" + String((int)M3) + " M4(FR)=" + String((int)M4);
+                    " -> M1=" + String((int)M1) + " M2=" + String((int)M2) +
+                    " M3=" + String((int)M3) + " M4=" + String((int)M4);
       logOut(line);
       lastMixDebugTime = millis();
     }
