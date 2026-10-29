@@ -178,6 +178,21 @@ class IMUDriverNode(Node):
                     gy = math.radians(raw[5] / 131.0)
                     gz = math.radians(raw[6] / 131.0)
 
+                    # -------------------------------------------------------
+                    # UPSIDE-DOWN MOUNTING CORRECTION (180-deg rotation around X-axis)
+                    # The MPU6050 is mounted hanging upside down on the robot.
+                    # This flips Y and Z axes for both accel and gyro:
+                    #   ay -> -ay  (Y axis inverted)
+                    #   az -> -az  (gravity direction corrected: -9.8 when level)
+                    #   gy -> -gy  (Y rotation inverted)
+                    #   gz -> -gz  (CRITICAL: yaw rate sign corrected for EKF)
+                    # Without gz correction, EKF integrates yaw backwards.
+                    # -------------------------------------------------------
+                    ay = -ay
+                    az = -az
+                    gy = -gy
+                    gz = -gz
+
                     now = time.time()
                     dt = max(now - self.last_update_time, 0.001)
                     self.last_update_time = now
@@ -216,6 +231,12 @@ class IMUDriverNode(Node):
                     gx, gy, gz = float(parts[3]), float(parts[4]), float(parts[5])
                     if max(abs(gx), abs(gy), abs(gz)) > 15.0:
                         gx, gy, gz = math.radians(gx), math.radians(gy), math.radians(gz)
+
+                    # Upside-down mounting correction (same as i2c_loop)
+                    ay = -ay
+                    az = -az
+                    gy = -gy
+                    gz = -gz
 
                     now = time.time()
                     dt = max(now - self.last_update_time, 0.001)
