@@ -151,17 +151,17 @@ local_costmap:
           max_obstacle_height: 2.0   # LiDAR is mounted high at 1.6m
           min_obstacle_height: 0.0
           obstacle_max_range: 3.0
-          obstacle_min_range: 0.0
+          obstacle_min_range: 0.12          # Filter RPLiDAR near-field noise (<12cm)
           raytrace_max_range: 3.5
-          raytrace_min_range: 0.0
+          raytrace_min_range: 0.12
           clearing: True             # Crucial for dynamic obstacles: clears cells when obstacle moves away
           marking: True
           data_type: "LaserScan"
 
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        cost_scaling_factor: 3.0
-        inflation_radius: 0.45
+        cost_scaling_factor: 5.0     # Steeper dropoff = less area is high-cost, allows tighter spaces
+        inflation_radius: 0.20       # Was 0.45 — reduced: total clearance now 0.25+0.20=0.45m
 
       always_send_full_costmap: True
 
@@ -191,17 +191,17 @@ global_costmap:
           max_obstacle_height: 2.0
           min_obstacle_height: 0.0
           obstacle_max_range: 3.0
-          obstacle_min_range: 0.0
+          obstacle_min_range: 0.12
           raytrace_max_range: 3.5
-          raytrace_min_range: 0.0
+          raytrace_min_range: 0.12
           clearing: True
           marking: True
           data_type: "LaserScan"
 
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        cost_scaling_factor: 3.0
-        inflation_radius: 0.55
+        cost_scaling_factor: 5.0
+        inflation_radius: 0.25       # Was 0.55 — reduced for tighter indoor spaces
 
       always_send_full_costmap: True
 
