@@ -87,45 +87,32 @@ controller_server:
       xy_goal_tolerance: 0.10   # 10cm - was 0.15m, tightened so nearby goals don't instantly succeed
       yaw_goal_tolerance: 3.14159
 
+    # RegulatedPurePursuitController replaces DWB.
+    # DWB needs precise velocity calibration; RPP just follows the global path
+    # with a lookahead point — robust to SLAM drift and motor speed variance.
     FollowPath:
-      plugin: "dwb_core::DWBLocalPlanner"
-      debug_trajectory_details: True
-      # Holonomic Mecanum robot: can strafe, does NOT need to rotate to face goal
-      min_vel_x: -0.22          # Allow backward motion when goal is behind robot
-      min_vel_y: -0.12          # Strafe left enabled
-      max_vel_x: 0.22           # Forward speed (slightly conservative for stability)
-      max_vel_y: 0.12           # Strafe speed
-      max_vel_theta: 0.8        # Rotation speed
-      min_speed_xy: 0.0
-      max_speed_xy: 0.22
-      min_speed_theta: 0.0
-      acc_lim_x: 1.5            # Gentler acceleration for better tracking
-      acc_lim_y: 0.5
-      acc_lim_theta: 2.0
-      decel_lim_x: -1.5
-      decel_lim_y: -0.5
-      decel_lim_theta: -2.0
-      vx_samples: 15
-      vy_samples: 8
-      vtheta_samples: 20
-      sim_time: 1.5
-      linear_granularity: 0.05
-      angular_granularity: 0.025
+      plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
+      desired_linear_vel: 0.20           # Cruise speed m/s
+      lookahead_dist: 0.40               # Aim this far ahead on path
+      min_lookahead_dist: 0.20
+      max_lookahead_dist: 0.70
+      lookahead_time: 1.5
+      rotate_to_heading_angular_vel: 0.7 # Speed for in-place rotation
       transform_tolerance: 0.3
-      xy_goal_tolerance: 0.10   # Match goal checker above
-      trans_stopped_velocity: 0.05
-      short_circuit_trajectory_evaluation: True
-      stateful: True
-      # Restore RotateToGoal: rotates robot to face goal before approach
-      # (previous wrong direction was from track_unknown_space:True, now fixed)
-      critics: ["RotateToGoal", "Oscillation", "BaseObstacle", "PathDist", "GoalDist"]
-      BaseObstacle.scale: 0.02
-      PathDist.scale: 32.0
-      GoalDist.scale: 24.0
-      RotateToGoal.scale: 32.0
-      RotateToGoal.slowing_factor: 5.0
-      RotateToGoal.lookahead_time: -1.0
-      Oscillation.scale: 1.0    # Dampen the wild yaw oscillations
+      use_velocity_scaled_lookahead_dist: True
+      min_approach_linear_velocity: 0.05
+      approach_velocity_scaling_dist: 0.6
+      use_collision_detection: True
+      max_allowed_time_to_collision_up_to_goal: 1.0
+      use_regulated_linear_velocity_scaling: True
+      use_cost_regulated_linear_velocity_scaling: False
+      regulated_linear_scaling_min_radius: 0.8
+      regulated_linear_scaling_min_speed: 0.25
+      use_rotate_to_heading: True        # Rotate in place first, then drive straight
+      allow_reversing: False
+      rotate_to_heading_min_angle: 0.8   # ~46 deg threshold before rotating
+      max_angular_accel: 2.0
+      max_robot_pose_search_dist: 10.0
 
 local_costmap:
   local_costmap:
