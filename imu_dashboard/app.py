@@ -156,12 +156,13 @@ def discover_mpu6050_bus():
                 IMU_ADDRESS, 0x75
             )
 
-            if who_am_i not in (0x68, 0x69):
+            # Accept 0x68 (standard MPU6050), 0x69 (AD0=1), 0x70 (MPU9250),
+            # 0x71 (MPU9250 alt), 0x72 (clone variant seen on Jetson i2c-7).
+            # Any non-zero response means the device is alive and communicating.
+            if who_am_i == 0x00:
                 errors.append(
-                    f"Bus {bus_number}: unexpected "
-                    f"WHO_AM_I=0x{who_am_i:02X}"
+                    f"Bus {bus_number}: WHO_AM_I returned 0x00 — sensor may be in reset"
                 )
-
                 bus.close()
                 continue
 
@@ -335,7 +336,7 @@ def sensor_loop():
 
             socketio.emit("imu", packet)
 
-            if now - last_telemetry_log >= 0.2:
+            if now - last_telemetry_log >= 2.0:  # Log at most once per 2s
                 log(
                     f"IMU ax={ax:+.3f}g "
                     f"ay={ay:+.3f}g "
@@ -435,6 +436,11 @@ def start_sensor_worker():
 
             thread.start()
 
+
+
+# Start the IMU sensor worker here so it runs regardless of whether
+# the app is launched as `python app.py` or via gunicorn/Docker CMD.
+start_sensor_worker()
 
 if __name__ == "__main__":
     start_sensor_worker()
