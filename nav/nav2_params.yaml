@@ -78,8 +78,8 @@ controller_server:
 
     progress_checker:
       plugin: "nav2_controller::SimpleProgressChecker"
-      required_movement_radius: 0.3
-      movement_time_allowance: 15.0
+      required_movement_radius: 0.15  # Reduced from 0.3 - requires less movement to count
+      movement_time_allowance: 30.0   # Increased from 15s for longer trips
 
     general_goal_checker:
       stateful: True
@@ -91,7 +91,7 @@ controller_server:
       plugin: "dwb_core::DWBLocalPlanner"
       debug_trajectory_details: True
       # Holonomic Mecanum robot: can strafe, does NOT need to rotate to face goal
-      min_vel_x: 0.0           # No backward motion - simpler and more predictable
+      min_vel_x: -0.22          # Allow backward motion when goal is behind robot
       min_vel_y: -0.12          # Strafe left enabled
       max_vel_x: 0.22           # Forward speed (slightly conservative for stability)
       max_vel_y: 0.12           # Strafe speed
@@ -116,12 +116,16 @@ controller_server:
       trans_stopped_velocity: 0.05
       short_circuit_trajectory_evaluation: True
       stateful: True
-      # Holonomic critics: RotateToGoal REMOVED (non-holonomic only)
-      # PathDist + GoalDist drive the robot toward the goal via direct/strafe path
-      critics: ["Oscillation", "BaseObstacle", "PathDist", "GoalDist"]
+      # Restore RotateToGoal: rotates robot to face goal before approach
+      # (previous wrong direction was from track_unknown_space:True, now fixed)
+      critics: ["RotateToGoal", "Oscillation", "BaseObstacle", "PathDist", "GoalDist"]
       BaseObstacle.scale: 0.02
       PathDist.scale: 32.0
       GoalDist.scale: 24.0
+      RotateToGoal.scale: 32.0
+      RotateToGoal.slowing_factor: 5.0
+      RotateToGoal.lookahead_time: -1.0
+      Oscillation.scale: 1.0    # Dampen the wild yaw oscillations
 
 local_costmap:
   local_costmap:
